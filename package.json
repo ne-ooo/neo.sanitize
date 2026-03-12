@@ -1,0 +1,86 @@
+{
+  "name": "@lpm.dev/neo.sanitize",
+  "version": "1.0.0",
+  "description": "Modern, zero-dependency HTML sanitization library - XSS prevention for browsers and Node.js",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.cjs"
+    },
+    "./validators": {
+      "types": "./dist/validators/index.d.ts",
+      "import": "./dist/validators/index.js",
+      "require": "./dist/validators/index.cjs"
+    },
+    "./schemas": {
+      "types": "./dist/config/schemas.d.ts",
+      "import": "./dist/config/schemas.js",
+      "require": "./dist/config/schemas.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    ".lpm",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "vitest bench",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "keywords": [
+    "lpm",
+    "sanitize",
+    "html",
+    "xss",
+    "security",
+    "dom",
+    "dompurify",
+    "sanitize-html",
+    "browser",
+    "nodejs",
+    "zero-dependency",
+    "typescript"
+  ],
+  "author": "neo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ne-ooo/neo.sanitize"
+  },
+  "bugs": {
+    "url": "https://github.com/ne-ooo/neo.sanitize/issues"
+  },
+  "homepage": "https://github.com/ne-ooo/neo.sanitize#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "dompurify": "^3.0.9",
+    "jsdom": "^24.0.0",
+    "sanitize-html": "^2.12.1",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
+  }
+}
