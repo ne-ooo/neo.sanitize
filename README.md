@@ -24,14 +24,16 @@ lpm install @lpm.dev/neo.sanitize
 ## Quick Start
 
 ```typescript
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 // Basic usage - sanitize HTML string
-const clean = sanitize('<p>Hello <strong>world</strong>!</p>')
+const clean = sanitize("<p>Hello <strong>world</strong>!</p>");
 // Output: '<p>Hello <strong>world</strong>!</p>'
 
 // Removes dangerous content
-const safe = sanitize('<p onclick="alert(1)">Click</p><script>alert(1)</script>')
+const safe = sanitize(
+  '<p onclick="alert(1)">Click</p><script>alert(1)</script>',
+);
 // Output: '<p>Click</p>'
 ```
 
@@ -40,28 +42,32 @@ const safe = sanitize('<p onclick="alert(1)">Click</p><script>alert(1)</script>'
 ### XSS Protection (143 Test Vectors)
 
 **Blocks Script Injection:**
+
 ```typescript
-sanitize('<script>alert("XSS")</script>')  // ''
-sanitize('<p>Safe</p><script>alert(1)</script>')  // '<p>Safe</p>'
+sanitize('<script>alert("XSS")</script>'); // ''
+sanitize("<p>Safe</p><script>alert(1)</script>"); // '<p>Safe</p>'
 ```
 
 **Removes Event Handlers:**
+
 ```typescript
-sanitize('<div onclick="alert(1)">Click</div>')  // '<div>Click</div>'
-sanitize('<img src=x onerror="alert(1)">')  // '<img src="x">'
+sanitize('<div onclick="alert(1)">Click</div>'); // '<div>Click</div>'
+sanitize('<img src=x onerror="alert(1)">'); // '<img src="x">'
 ```
 
 **Validates URL Protocols:**
+
 ```typescript
-sanitize('<a href="javascript:alert(1)">Click</a>')  // '<a>Click</a>'
-sanitize('<a href="https://safe.com">Click</a>')  // '<a href="https://safe.com">Click</a>'
+sanitize('<a href="javascript:alert(1)">Click</a>'); // '<a>Click</a>'
+sanitize('<a href="https://safe.com">Click</a>'); // '<a href="https://safe.com">Click</a>'
 ```
 
 **Removes Dangerous Tags:**
+
 ```typescript
-sanitize('<iframe src="http://evil.com"></iframe>')  // ''
-sanitize('<object data="evil.swf"></object>')  // ''
-sanitize('<style>body{background:url("javascript:alert(1)")}</style>')  // ''
+sanitize('<iframe src="http://evil.com"></iframe>'); // ''
+sanitize('<object data="evil.swf"></object>'); // ''
+sanitize('<style>body{background:url("javascript:alert(1)")}</style>'); // ''
 ```
 
 ## API
@@ -71,19 +77,20 @@ sanitize('<style>body{background:url("javascript:alert(1)")}</style>')  // ''
 Sanitize an HTML string with optional configuration.
 
 ```typescript
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
-const result = sanitize('<p>Hello</p>', {
-  allowedTags: ['p', 'strong', 'em'],
+const result = sanitize("<p>Hello</p>", {
+  allowedTags: ["p", "strong", "em"],
   allowedAttributes: {
-    a: ['href', 'title'],
-    img: ['src', 'alt']
+    a: ["href", "title"],
+    img: ["src", "alt"],
   },
-  allowedProtocols: ['http', 'https', 'mailto']
-})
+  allowedProtocols: ["http", "https", "mailto"],
+});
 ```
 
 **Parameters:**
+
 - `html` (string) - HTML string to sanitize
 - `options` (object, optional) - Sanitization options
 
@@ -96,12 +103,12 @@ const result = sanitize('<p>Hello</p>', {
 Minimal HTML - text formatting, links, and lists only.
 
 ```typescript
-import { sanitizeBasic } from '@lpm.dev/neo.sanitize'
+import { sanitizeBasic } from "@lpm.dev/neo.sanitize";
 
-sanitizeBasic('<p><strong>Bold</strong> text</p>')
+sanitizeBasic("<p><strong>Bold</strong> text</p>");
 // Output: '<p><strong>Bold</strong> text</p>'
 
-sanitizeBasic('<img src="image.jpg">')
+sanitizeBasic('<img src="image.jpg">');
 // Output: '' (images not allowed in BASIC)
 ```
 
@@ -112,12 +119,12 @@ sanitizeBasic('<img src="image.jpg">')
 Rich HTML - includes images, tables, headings, and class attributes.
 
 ```typescript
-import { sanitizeRelaxed } from '@lpm.dev/neo.sanitize'
+import { sanitizeRelaxed } from "@lpm.dev/neo.sanitize";
 
-sanitizeRelaxed('<img src="image.jpg" alt="Photo">')
+sanitizeRelaxed('<img src="image.jpg" alt="Photo">');
 // Output: '<img src="image.jpg" alt="Photo">'
 
-sanitizeRelaxed('<table><tr><td>Data</td></tr></table>')
+sanitizeRelaxed("<table><tr><td>Data</td></tr></table>");
 // Output: '<table><tbody><tr><td>Data</td></tr></tbody></table>'
 ```
 
@@ -130,12 +137,12 @@ sanitizeRelaxed('<table><tr><td>Data</td></tr></table>')
 Text only - strips all HTML tags.
 
 ```typescript
-import { sanitizeStrict } from '@lpm.dev/neo.sanitize'
+import { sanitizeStrict } from "@lpm.dev/neo.sanitize";
 
-sanitizeStrict('<p>Just <strong>text</strong> content</p>')
+sanitizeStrict("<p>Just <strong>text</strong> content</p>");
 // Output: 'Just text content'
 
-sanitizeStrict('<script>alert(1)</script><p>Safe</p>')
+sanitizeStrict("<script>alert(1)</script><p>Safe</p>");
 // Output: 'Safe'
 ```
 
@@ -144,24 +151,24 @@ sanitizeStrict('<script>alert(1)</script><p>Safe</p>')
 Create a reusable sanitizer instance with preset configuration.
 
 ```typescript
-import { createSanitizer } from '@lpm.dev/neo.sanitize'
+import { createSanitizer } from "@lpm.dev/neo.sanitize";
 
 const sanitizer = createSanitizer({
-  allowedTags: ['p', 'strong', 'em', 'a'],
+  allowedTags: ["p", "strong", "em", "a"],
   allowedAttributes: {
-    a: ['href', 'title']
-  }
-})
+    a: ["href", "title"],
+  },
+});
 
 // Reuse the same configuration
-const result1 = sanitizer.sanitize('<p>Hello</p>')
-const result2 = sanitizer.sanitize('<a href="/">Link</a>')
+const result1 = sanitizer.sanitize("<p>Hello</p>");
+const result2 = sanitizer.sanitize('<a href="/">Link</a>');
 
 // Get current config
-const config = sanitizer.getConfig()
+const config = sanitizer.getConfig();
 
 // Update config
-sanitizer.updateConfig({ allowDataAttributes: true })
+sanitizer.updateConfig({ allowDataAttributes: true });
 ```
 
 ## Configuration Options
@@ -169,31 +176,31 @@ sanitizer.updateConfig({ allowDataAttributes: true })
 ```typescript
 interface SanitizeOptions {
   // Tag and attribute filtering
-  allowedTags?: string[]  // Default: 50+ safe HTML tags
-  allowedAttributes?: Record<string, string[]>  // Tag-specific attributes
-  forbiddenAttributes?: string[]  // Default: 60+ event handlers
+  allowedTags?: string[]; // Default: 50+ safe HTML tags
+  allowedAttributes?: Record<string, string[]>; // Tag-specific attributes
+  forbiddenAttributes?: string[]; // Default: 60+ event handlers
 
   // Protocol filtering
-  allowedProtocols?: string[]  // Default: ['http', 'https', 'mailto', 'tel', 'ftp', 'ftps']
+  allowedProtocols?: string[]; // Default: ['http', 'https', 'mailto', 'tel', 'ftp', 'ftps']
 
   // Special attributes
-  allowDataAttributes?: boolean  // Allow data-* attributes
-  allowAriaAttributes?: boolean  // Allow aria-* attributes
-  allowClassAttribute?: boolean  // Allow class attribute
-  allowIdAttribute?: boolean  // Allow id attribute
-  allowStyleAttribute?: boolean  // Allow style attribute
-  allowAllAttributes?: boolean  // Allow all attributes (dangerous!)
+  allowDataAttributes?: boolean; // Allow data-* attributes
+  allowAriaAttributes?: boolean; // Allow aria-* attributes
+  allowClassAttribute?: boolean; // Allow class attribute
+  allowIdAttribute?: boolean; // Allow id attribute
+  allowStyleAttribute?: boolean; // Allow style attribute
+  allowAllAttributes?: boolean; // Allow all attributes (dangerous!)
 
   // Content handling
-  keepTextContent?: boolean  // Keep text from removed tags (safe tags only)
-  stripTags?: boolean  // Remove tags but keep text content
+  keepTextContent?: boolean; // Keep text from removed tags (safe tags only)
+  stripTags?: boolean; // Remove tags but keep text content
 
   // Output format
-  returnString?: boolean  // Return string (default: true) or DocumentFragment
+  returnString?: boolean; // Return string (default: true) or DocumentFragment
 
   // Normalization
-  lowercaseTags?: boolean  // Normalize tag names to lowercase
-  lowercaseAttributes?: boolean  // Normalize attribute names to lowercase
+  lowercaseTags?: boolean; // Normalize tag names to lowercase
+  lowercaseAttributes?: boolean; // Normalize attribute names to lowercase
 }
 ```
 
@@ -202,72 +209,72 @@ interface SanitizeOptions {
 ### Blog Comment Sanitization
 
 ```typescript
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 // Allow rich text formatting but no images or scripts
 const cleanComment = sanitize(userComment, {
-  allowedTags: ['p', 'strong', 'em', 'a', 'ul', 'ol', 'li', 'br'],
+  allowedTags: ["p", "strong", "em", "a", "ul", "ol", "li", "br"],
   allowedAttributes: {
-    a: ['href', 'title']
+    a: ["href", "title"],
   },
-  allowedProtocols: ['http', 'https']
-})
+  allowedProtocols: ["http", "https"],
+});
 ```
 
 ### Markdown-to-HTML Output
 
 ```typescript
-import { sanitizeRelaxed } from '@lpm.dev/neo.sanitize'
+import { sanitizeRelaxed } from "@lpm.dev/neo.sanitize";
 
 // Sanitize generated HTML from markdown
-const html = markdownToHtml(userMarkdown)
-const safe = sanitizeRelaxed(html)  // Allow tables, code blocks, etc.
+const html = markdownToHtml(userMarkdown);
+const safe = sanitizeRelaxed(html); // Allow tables, code blocks, etc.
 ```
 
 ### Email Content Sanitization
 
 ```typescript
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 // Very restrictive - no links, images, or scripts
 const cleanEmail = sanitize(emailBody, {
-  allowedTags: ['p', 'strong', 'em', 'br'],
+  allowedTags: ["p", "strong", "em", "br"],
   allowedAttributes: {},
-  keepTextContent: true
-})
+  keepTextContent: true,
+});
 ```
 
 ### Custom Configuration
 
 ```typescript
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 // Allow specific tags and attributes for your use case
 const result = sanitize(html, {
-  allowedTags: ['div', 'p', 'img', 'a'],
+  allowedTags: ["div", "p", "img", "a"],
   allowedAttributes: {
-    div: ['class'],
-    p: ['class'],
-    img: ['src', 'alt', 'class'],
-    a: ['href', 'title', 'class']
+    div: ["class"],
+    p: ["class"],
+    img: ["src", "alt", "class"],
+    a: ["href", "title", "class"],
   },
-  allowDataAttributes: true,  // Allow data-* attributes
-  allowAriaAttributes: true,  // Allow aria-* attributes
-  allowedProtocols: ['http', 'https'],
-  keepTextContent: false  // Remove content from disallowed tags
-})
+  allowDataAttributes: true, // Allow data-* attributes
+  allowAriaAttributes: true, // Allow aria-* attributes
+  allowedProtocols: ["http", "https"],
+  keepTextContent: false, // Remove content from disallowed tags
+});
 ```
 
 ### DocumentFragment Output
 
 ```typescript
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 // Get DocumentFragment instead of string (for DOM manipulation)
-const fragment = sanitize(html, { returnString: false }) as DocumentFragment
+const fragment = sanitize(html, { returnString: false }) as DocumentFragment;
 
 // Append to DOM
-document.body.appendChild(fragment)
+document.body.appendChild(fragment);
 ```
 
 ## Performance
@@ -275,26 +282,31 @@ document.body.appendChild(fragment)
 Benchmarks run on Node.js with jsdom, comparing against industry-standard libraries:
 
 ### Small HTML (~50 chars)
+
 - **sanitize-html:** 83,253 ops/sec (fastest) ⚡
 - **DOMPurify:** 14,145 ops/sec
 - **neo.sanitize:** 8,195 ops/sec
 
 ### Medium HTML (~300 chars)
+
 - **sanitize-html:** 40,285 ops/sec (fastest) ⚡
 - **DOMPurify:** 3,750 ops/sec
 - **neo.sanitize:** 2,373 ops/sec
 
 ### Large HTML (~1.5 KB)
+
 - **sanitize-html:** 18,052 ops/sec (fastest) ⚡
 - **neo.sanitize:** 1,431 ops/sec
 - **DOMPurify:** 1,277 ops/sec
 
 ### HTML with XSS Vectors
+
 - **sanitize-html:** 81,844 ops/sec (fastest) ⚡
 - **DOMPurify:** 9,463 ops/sec
 - **neo.sanitize:** 6,235 ops/sec
 
 ### High-Volume (1000 small HTML)
+
 - **sanitize-html:** 119 ops/sec (fastest) ⚡
 - **DOMPurify:** 13 ops/sec
 - **neo.sanitize:** 11 ops/sec
@@ -310,6 +322,7 @@ Benchmarks run on Node.js with jsdom, comparing against industry-standard librar
 - ✅ Node.js 18+ (with jsdom)
 
 **Requirements:**
+
 - DOMParser API
 - DocumentFragment API
 - ES2020+ features
@@ -366,46 +379,46 @@ npm run build
 
 ```typescript
 // Before (DOMPurify)
-import DOMPurify from 'dompurify'
+import DOMPurify from "dompurify";
 
 const clean = DOMPurify.sanitize(dirty, {
-  ALLOWED_TAGS: ['p', 'strong'],
-  ALLOWED_ATTR: ['href']
-})
+  ALLOWED_TAGS: ["p", "strong"],
+  ALLOWED_ATTR: ["href"],
+});
 
 // After (neo.sanitize)
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 const clean = sanitize(dirty, {
-  allowedTags: ['p', 'strong'],
+  allowedTags: ["p", "strong"],
   allowedAttributes: {
-    a: ['href']
-  }
-})
+    a: ["href"],
+  },
+});
 ```
 
 ## Migration from sanitize-html
 
 ```typescript
 // Before (sanitize-html)
-import sanitizeHtml from 'sanitize-html'
+import sanitizeHtml from "sanitize-html";
 
 const clean = sanitizeHtml(dirty, {
-  allowedTags: ['p', 'strong'],
+  allowedTags: ["p", "strong"],
   allowedAttributes: {
-    a: ['href']
-  }
-})
+    a: ["href"],
+  },
+});
 
 // After (neo.sanitize) - same API!
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 const clean = sanitize(dirty, {
-  allowedTags: ['p', 'strong'],
+  allowedTags: ["p", "strong"],
   allowedAttributes: {
-    a: ['href']
-  }
-})
+    a: ["href"],
+  },
+});
 ```
 
 ## TypeScript Support
@@ -413,16 +426,16 @@ const clean = sanitize(dirty, {
 Full TypeScript support with strict type checking:
 
 ```typescript
-import { sanitize, SanitizeOptions } from '@lpm.dev/neo.sanitize'
+import { sanitize, SanitizeOptions } from "@lpm.dev/neo.sanitize";
 
 const options: SanitizeOptions = {
-  allowedTags: ['p', 'strong'],
+  allowedTags: ["p", "strong"],
   allowedAttributes: {
-    a: ['href', 'title']
-  }
-}
+    a: ["href", "title"],
+  },
+};
 
-const clean: string = sanitize(html, options)
+const clean: string = sanitize(html, options);
 ```
 
 ## Tree-Shaking
@@ -431,18 +444,23 @@ Import only what you need for optimal bundle size:
 
 ```typescript
 // Import specific functions (< 1 KB)
-import { sanitize } from '@lpm.dev/neo.sanitize'
+import { sanitize } from "@lpm.dev/neo.sanitize";
 
 // Import schema helpers (< 500 bytes each)
-import { sanitizeBasic, sanitizeRelaxed, sanitizeStrict } from '@lpm.dev/neo.sanitize'
+import {
+  sanitizeBasic,
+  sanitizeRelaxed,
+  sanitizeStrict,
+} from "@lpm.dev/neo.sanitize";
 
 // Import core utilities
-import { createSanitizer } from '@lpm.dev/neo.sanitize'
+import { createSanitizer } from "@lpm.dev/neo.sanitize";
 ```
 
 ## Why neo.sanitize?
 
 ### vs DOMPurify
+
 - ✅ **Zero dependencies** (DOMPurify has none too)
 - ✅ **Tree-shakeable** exports
 - ✅ **TypeScript-first** (DOMPurify has community types)
@@ -451,36 +469,12 @@ import { createSanitizer } from '@lpm.dev/neo.sanitize'
 - ⚠️ Less mature (DOMPurify is battle-tested)
 
 ### vs sanitize-html
+
 - ✅ **Browser-native** (sanitize-html is server-only)
 - ✅ **Zero dependencies** (sanitize-html has 4 dependencies)
 - ✅ **Smaller bundle** (< 3 KB vs ~60 KB)
 - ✅ **TypeScript-first** (sanitize-html has community types)
 - ⚠️ Slower performance (sanitize-html uses htmlparser2)
-
-## Development Status
-
-**Phase 1 (Current): Browser-Native MVP** ✅
-- [x] Zero dependencies (native DOMParser)
-- [x] Tag/attribute whitelisting
-- [x] Protocol validation
-- [x] Event handler removal
-- [x] Predefined schemas (BASIC, RELAXED, STRICT)
-- [x] 143 XSS vector tests (100% passing)
-- [x] Benchmarks vs DOMPurify and sanitize-html
-- [x] Comprehensive documentation
-
-**Phase 2 (Planned): Performance Optimization**
-- [ ] Caching and memoization
-- [ ] Optimized attribute validation
-- [ ] String-based parsing option
-- [ ] Target: 2-3x performance improvement
-
-**Phase 3 (Planned): Advanced Features**
-- [ ] Custom element support
-- [ ] CSS sanitization
-- [ ] SVG sanitization
-- [ ] URL rewriting hooks
-- [ ] Sanitization hooks and plugins
 
 ## License
 
