@@ -40,13 +40,26 @@ jobs:
           key: lpm-store-${{ runner.os }}-node-${{ matrix.node }}-${{ hashFiles('lpm.lock') }}
           restore-keys: lpm-store-${{ runner.os }}-node-${{ matrix.node }}-
 
-      - name: Install dependencies
+      - name: Install dependencies for compatibility tests
+        if: matrix.node != '22'
+        run: lpm ci --strict-integrity --no-engine-strict --no-skills --no-editor-setup --no-security-summary
+
+      - name: Install dependencies for release checks
+        if: matrix.node == '22'
         run: lpm ci --strict-integrity --no-skills --no-editor-setup --no-security-summary
 
       - name: Audit dependencies
+        if: matrix.node == '22'
         run: lpm audit --fail-on vuln
 
+      - name: Run compatibility checks
+        if: matrix.node != '22'
+        run: |
+          lpm run typecheck
+          lpm run test
+
       - name: Run release checks
+        if: matrix.node == '22'
         run: lpm run release:check
 
       - name: Check the publish package
