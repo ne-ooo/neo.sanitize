@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node.js ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22']
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install LPM CLI
+        run: npm install --global @lpm-registry/cli@0.73.0 --allow-scripts=@lpm-registry/cli
+
+      - name: Cache the LPM store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.lpm/store
+          key: lpm-store-${{ runner.os }}-node-${{ matrix.node }}-${{ hashFiles('lpm.lock') }}
+          restore-keys: lpm-store-${{ runner.os }}-node-${{ matrix.node }}-
+
+      - name: Install dependencies for compatibility tests
+        if: matrix.node != '22'
+        run: lpm ci --strict-integrity --no-engine-strict --no-skills --no-editor-setup --no-security-summary
+
+      - name: Install dependencies for release checks
+        if: matrix.node == '22'
+        run: lpm ci --strict-integrity --no-skills --no-editor-setup --no-security-summary
+
+      - name: Audit dependencies
+        if: matrix.node == '22'
+        run: lpm audit --fail-on vuln
+
+      - name: Run compatibility checks
+        if: matrix.node != '22'
+        run: |
+          lpm run typecheck
+          lpm run test
+
+      - name: Run release checks
+        if: matrix.node == '22'
+        run: lpm run release:check
+
+      - name: Check the publish package
+        if: matrix.node == '22'
+        run: lpm publish --check

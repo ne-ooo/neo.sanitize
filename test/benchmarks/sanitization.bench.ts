@@ -7,7 +7,7 @@
  */
 
 import { bench, describe } from 'vitest'
-import { sanitize as neoSanitize } from '../../src/core/sanitizer.js'
+import { createSanitizer, sanitize as neoSanitize } from '../../src/core/sanitizer.js'
 import DOMPurify from 'dompurify'
 import sanitizeHtml from 'sanitize-html'
 import { JSDOM } from 'jsdom'
@@ -15,6 +15,7 @@ import { JSDOM } from 'jsdom'
 // Setup DOMPurify for Node.js (needs jsdom)
 const window = new JSDOM('').window
 const DOMPurifyInstance = DOMPurify(window as unknown as Window)
+const reusableNeoSanitizer = createSanitizer()
 
 // Test inputs
 const SMALL_HTML = '<p>Hello <strong>world</strong>!</p>'
@@ -139,6 +140,12 @@ describe('High-volume (1000 small HTML)', () => {
   bench('neo.sanitize', () => {
     for (let i = 0; i < 1000; i++) {
       neoSanitize(SMALL_HTML)
+    }
+  })
+
+  bench('neo.sanitize reusable', () => {
+    for (let i = 0; i < 1000; i++) {
+      reusableNeoSanitizer.sanitize(SMALL_HTML)
     }
   })
 

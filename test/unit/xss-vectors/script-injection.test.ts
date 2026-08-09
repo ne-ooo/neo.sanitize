@@ -9,6 +9,16 @@ import { describe, it, expect } from 'vitest'
 import { sanitize } from '../../../src/core/sanitizer.js'
 
 describe('Script Injection XSS Vectors', () => {
+  it('never permits active-content tags from a custom allowlist', () => {
+    const html = '<div><script>alert(1)</script><style>body{display:none}</style></div>'
+    const result = sanitize(html, {
+      allowedTags: ['div', 'script', 'style'],
+      allowedAttributes: {},
+    })
+
+    expect(result).toBe('<div></div>')
+  })
+
   describe('Basic <script> tag injection', () => {
     it('should remove basic script tag', () => {
       const html = '<script>alert("XSS")</script>'

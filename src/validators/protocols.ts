@@ -12,6 +12,113 @@
 import type { ProtocolValidationResult } from '../types.js'
 import { ALLOWED_PROTOCOLS, DANGEROUS_PROTOCOLS } from '../utils/constants.js'
 
+const DANGEROUS_PROTOCOL_SET = new Set(DANGEROUS_PROTOCOLS)
+
+type ProtocolCollection = readonly string[] | ReadonlySet<string>
+
+function collectionHas(collection: ProtocolCollection, value: string): boolean {
+  return 'has' in collection ? collection.has(value) : collection.includes(value)
+}
+
+function isASCIIWhitespace(character: string): boolean {
+  return character === ' ' || character === '\t' || character === '\n' || character === '\f' || character === '\r'
+}
+
+/**
+ * Extract each URL candidate from an HTML URL attribute.
+ *
+ * srcset/imagesrcset use comma-separated image candidates whose first token
+ * is the URL. data: candidates are forbidden by protocol policy, so treating
+ * their comma as a boundary is deliberately fail-closed.
+ */
+function getURLCandidates(normalizedName: string, value: string): string[] {
+  if (normalizedName === 'srcset' || normalizedName === 'imagesrcset') {
+    const candidates: string[] = []
+
+    for (const candidate of value.split(',')) {
+      const trimmed = candidate.trim()
+      if (!trimmed) continue
+
+      let end = 0
+      while (end < trimmed.length && !isASCIIWhitespace(trimmed[end] ?? '')) {
+        end++
+      }
+
+      const url = trimmed.slice(0, end)
+      if (url) candidates.push(url)
+    }
+
+    return candidates
+  }
+
+  if (normalizedName === 'ping' || normalizedName === 'attributionsrc') {
+    const candidates: string[] = []
+    let start = -1
+
+    for (let index = 0; index <= value.length; index++) {
+      const character = value[index]
+      if (character !== undefined && !isASCIIWhitespace(character)) {
+        if (start === -1) start = index
+        continue
+      }
+
+      if (start !== -1) {
+        candidates.push(value.slice(start, index))
+        start = -1
+      }
+    }
+
+    return candidates
+  }
+
+  return [value]
+}
+
+/**
+ * Validate every URL carried by an HTML URL attribute.
+ */
+export function isSafeURLAttributeValue(
+  attrName: string,
+  value: string,
+  allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS
+): boolean {
+  return isSafeURLAttributeValueNormalized(
+    attrName.toLowerCase().trim(),
+    value,
+    allowedProtocols
+  )
+}
+
+/**
+ * Validate a URL attribute whose name is already normalized.
+ */
+export function isSafeURLAttributeValueNormalized(
+  normalizedName: string,
+  value: string,
+  allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS
+): boolean {
+  const isURLList =
+    normalizedName === 'srcset' ||
+    normalizedName === 'imagesrcset' ||
+    normalizedName === 'ping' ||
+    normalizedName === 'attributionsrc'
+
+  if (!isURLList) {
+    return isSafeURL(value, allowedProtocols)
+  }
+
+  const candidates = getURLCandidates(normalizedName, value)
+
+  // Empty list-valued attributes do not initiate a request.
+  if (candidates.length === 0) return value.trim() === ''
+
+  for (const candidate of candidates) {
+    if (!isSafeURL(candidate, allowedProtocols)) return false
+  }
+
+  return true
+}
+
 /**
  * Extract protocol from a URL string
  *
@@ -43,14 +150,9 @@ export function getProtocol(url: string): string | null {
   }
 
   // Check for relative URLs (/path, ./path, ../path, path)
-  if (url.startsWith('/') || url.startsWith('.') || !url.includes(':')) {
-    return null // Relative URL, no protocol
-  }
-
-  // Extract protocol (everything before first colon)
   const colonIndex = url.indexOf(':')
-  if (colonIndex === -1) {
-    return null
+  if (url.startsWith('/') || url.startsWith('.') || colonIndex === -1) {
+    return null // Relative URL, no protocol
   }
 
   // Protocol is everything before the colon
@@ -77,7 +179,7 @@ export function getProtocol(url: string): string | null {
  */
 export function isProtocolAllowed(
   protocol: string | null,
-  allowedProtocols: readonly string[] | string[] = ALLOWED_PROTOCOLS
+  allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS
 ): boolean {
   // Null protocol (relative URL) is allowed
   if (protocol === null) {
@@ -85,7 +187,7 @@ export function isProtocolAllowed(
   }
 
   // Check if protocol is in allowed list
-  return allowedProtocols.includes(protocol)
+  return collectionHas(allowedProtocols, protocol)
 }
 
 /**
@@ -104,7 +206,7 @@ export function isDangerousProtocol(protocol: string | null): boolean {
     return false
   }
 
-  return DANGEROUS_PROTOCOLS.includes(protocol)
+  return DANGEROUS_PROTOCOL_SET.has(protocol)
 }
 
 /**
@@ -129,7 +231,7 @@ export function isDangerousProtocol(protocol: string | null): boolean {
  */
 export function validateProtocol(
   url: string,
-  allowedProtocols: readonly string[] | string[] = ALLOWED_PROTOCOLS
+  allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS
 ): ProtocolValidationResult {
   // Extract protocol
   const protocol = getProtocol(url)
@@ -183,7 +285,7 @@ export function validateProtocol(
  */
 export function sanitizeURL(
   url: string,
-  allowedProtocols: readonly string[] | string[] = ALLOWED_PROTOCOLS,
+  allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS,
   fallback: string = ''
 ): string {
   const result = validateProtocol(url, allowedProtocols)
@@ -211,7 +313,10 @@ export function sanitizeURL(
  */
 export function isSafeURL(
   url: string,
-  allowedProtocols: readonly string[] | string[] = ALLOWED_PROTOCOLS
+  allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS
 ): boolean {
-  return validateProtocol(url, allowedProtocols).allowed
+  const protocol = getProtocol(url)
+  if (protocol === null) return true
+  if (DANGEROUS_PROTOCOL_SET.has(protocol)) return false
+  return collectionHas(allowedProtocols, protocol)
 }

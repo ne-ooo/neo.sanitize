@@ -17,9 +17,40 @@ import {
   URL_ATTRIBUTES,
   DEFAULT_ALLOWED_ATTRIBUTES,
 } from '../utils/constants.js'
-import { sanitizeURL, isSafeURL } from './protocols.js'
+import { isSafeURLAttributeValueNormalized } from './protocols.js'
 import { validateDomClobbering } from './dom-clobbering.js'
 import { validateStyleAttribute } from './css.js'
+
+const FORBIDDEN_ATTRIBUTE_SET = new Set(FORBIDDEN_ATTRIBUTES)
+const URL_ATTRIBUTE_SET = new Set(URL_ATTRIBUTES)
+
+function collectionHas(
+  collection: readonly string[] | ReadonlySet<string>,
+  value: string
+): boolean {
+  return 'has' in collection ? collection.has(value) : collection.includes(value)
+}
+
+export interface AttributeValidationPolicy {
+  forbiddenAttributes: ReadonlySet<string>
+  allowAllAttributes: ReadonlySet<string>
+  allowedAttributes: ReadonlyMap<string, ReadonlySet<string>>
+  allowedProtocols: ReadonlySet<string>
+}
+
+function isForbiddenAttributeNormalized(
+  attrName: string,
+  forbiddenAttributes: readonly string[] | ReadonlySet<string> = FORBIDDEN_ATTRIBUTE_SET
+): boolean {
+  const explicitlyForbidden = collectionHas(forbiddenAttributes, attrName)
+
+  return (
+    explicitlyForbidden ||
+    (attrName.charCodeAt(0) === 111 &&
+      attrName.charCodeAt(1) === 110 &&
+      EVENT_HANDLER_REGEX.test(attrName))
+  )
+}
 
 /**
  * Normalize attribute name to lowercase
@@ -54,12 +85,16 @@ export function isEventHandler(attrName: string): boolean {
   const normalized = normalizeAttributeName(attrName)
 
   // Check if in forbidden list (faster)
-  if (FORBIDDEN_ATTRIBUTES.includes(normalized)) {
+  if (FORBIDDEN_ATTRIBUTE_SET.has(normalized)) {
     return true
   }
 
   // Check with regex (fallback for unlisted event handlers)
-  return EVENT_HANDLER_REGEX.test(normalized)
+  return (
+    normalized.charCodeAt(0) === 111 &&
+    normalized.charCodeAt(1) === 110 &&
+    EVENT_HANDLER_REGEX.test(normalized)
+  )
 }
 
 /**
@@ -113,7 +148,7 @@ export function isAriaAttribute(attrName: string): boolean {
  */
 export function isURLAttribute(attrName: string): boolean {
   const normalized = normalizeAttributeName(attrName)
-  return URL_ATTRIBUTES.includes(normalized)
+  return URL_ATTRIBUTE_SET.has(normalized)
 }
 
 /**
@@ -132,21 +167,47 @@ export function isURLAttribute(attrName: string): boolean {
  */
 export function isForbiddenAttribute(
   attrName: string,
-  forbiddenAttributes: readonly string[] | string[] = FORBIDDEN_ATTRIBUTES
+  forbiddenAttributes: readonly string[] | ReadonlySet<string> = FORBIDDEN_ATTRIBUTE_SET
 ): boolean {
   const normalized = normalizeAttributeName(attrName)
+  return isForbiddenAttributeNormalized(normalized, forbiddenAttributes)
+}
 
-  // Check if in forbidden list
-  if (forbiddenAttributes.includes(normalized)) {
+function isAttributeAllowedNormalized(
+  tagName: string,
+  attrName: string,
+  allowedAttributes: Readonly<Record<string, readonly string[]>> | Record<string, string[]>,
+  options: Partial<SanitizeOptions>,
+  policy: AttributeValidationPolicy | undefined,
+  checkForbidden: boolean
+): boolean {
+  if (
+    checkForbidden &&
+    isForbiddenAttributeNormalized(
+      attrName,
+      policy?.forbiddenAttributes ?? options.forbiddenAttributes ?? FORBIDDEN_ATTRIBUTE_SET
+    )
+  ) {
+    return false
+  }
+
+  if (attrName === 'class' && options.allowClassAttribute) return true
+  if (attrName === 'id' && options.allowIdAttribute) return true
+  if (attrName === 'style' && options.allowStyleAttribute) return true
+  if (options.allowDataAttributes && DATA_ATTRIBUTE_REGEX.test(attrName)) return true
+  if ((options.allowAriaAttributes ?? true) && ARIA_ATTRIBUTE_REGEX.test(attrName)) return true
+
+  if (
+    policy?.allowAllAttributes.has(tagName) ??
+    options.allowAllAttributes?.includes(tagName)
+  ) {
     return true
   }
 
-  // Check if it's an event handler
-  if (EVENT_HANDLER_REGEX.test(normalized)) {
-    return true
-  }
+  const allowedForTag = policy?.allowedAttributes.get(tagName) ?? allowedAttributes[tagName]
+  if (!allowedForTag) return false
 
-  return false
+  return collectionHas(allowedForTag, attrName)
 }
 
 /**
@@ -170,47 +231,14 @@ export function isAttributeAllowed(
   options: Partial<SanitizeOptions> = {}
 ): boolean {
   const normalized = normalizeAttributeName(attrName)
-
-  // Check if forbidden (highest priority)
-  if (isForbiddenAttribute(normalized, options.forbiddenAttributes)) {
-    return false
-  }
-
-  // Check global attribute permissions
-  if (normalized === 'class' && options.allowClassAttribute) {
-    return true
-  }
-
-  if (normalized === 'id' && options.allowIdAttribute) {
-    return true
-  }
-
-  if (normalized === 'style' && options.allowStyleAttribute) {
-    return true
-  }
-
-  // Check data-* attributes
-  if (isDataAttribute(normalized) && options.allowDataAttributes) {
-    return true
-  }
-
-  // Check aria-* attributes (default: true)
-  if (isAriaAttribute(normalized) && (options.allowAriaAttributes ?? true)) {
-    return true
-  }
-
-  // Check if tag allows all attributes
-  if (options.allowAllAttributes?.includes(tagName)) {
-    return true
-  }
-
-  // Check if attribute is in allowed list for this tag
-  const allowedForTag = allowedAttributes[tagName]
-  if (allowedForTag && allowedForTag.includes(normalized)) {
-    return true
-  }
-
-  return false
+  return isAttributeAllowedNormalized(
+    tagName,
+    normalized,
+    allowedAttributes,
+    options,
+    undefined,
+    true
+  )
 }
 
 /**
@@ -245,12 +273,38 @@ export function validateAttribute(
   attrName: string,
   attrValue: string,
   allowedAttributes: Readonly<Record<string, readonly string[]>> | Record<string, string[]> = DEFAULT_ALLOWED_ATTRIBUTES,
-  options: Partial<SanitizeOptions> = {}
+  options: Partial<SanitizeOptions> = {},
+  policy?: AttributeValidationPolicy
 ): AttributeValidationResult {
-  const normalized = normalizeAttributeName(attrName)
+  return validateAttributeNormalized(
+    tagName,
+    normalizeAttributeName(attrName),
+    attrValue,
+    allowedAttributes,
+    options,
+    policy
+  )
+}
+
+/**
+ * Validate an attribute whose name is already normalized.
+ */
+export function validateAttributeNormalized(
+  tagName: string,
+  normalized: string,
+  attrValue: string,
+  allowedAttributes: Readonly<Record<string, readonly string[]>> | Record<string, string[]> = DEFAULT_ALLOWED_ATTRIBUTES,
+  options: Partial<SanitizeOptions> = {},
+  policy?: AttributeValidationPolicy
+): AttributeValidationResult {
 
   // Check if forbidden (event handlers, formaction, etc.)
-  if (isForbiddenAttribute(normalized, options.forbiddenAttributes)) {
+  if (
+    isForbiddenAttributeNormalized(
+      normalized,
+      policy?.forbiddenAttributes ?? options.forbiddenAttributes ?? FORBIDDEN_ATTRIBUTE_SET
+    )
+  ) {
     return {
       allowed: false,
       attrName: normalized,
@@ -265,7 +319,16 @@ export function validateAttribute(
   }
 
   // Check if allowed for this tag
-  if (!isAttributeAllowed(tagName, normalized, allowedAttributes, options)) {
+  if (
+    !isAttributeAllowedNormalized(
+      tagName,
+      normalized,
+      allowedAttributes,
+      options,
+      policy,
+      false
+    )
+  ) {
     return {
       allowed: false,
       attrName: normalized,
@@ -294,8 +357,12 @@ export function validateAttribute(
   }
 
   // Validate URL protocols for URL attributes
-  if (isURLAttribute(normalized)) {
-    const urlSafe = isSafeURL(attrValue, options.allowedProtocols)
+  if (URL_ATTRIBUTE_SET.has(normalized)) {
+    const urlSafe = isSafeURLAttributeValueNormalized(
+      normalized,
+      attrValue,
+      policy?.allowedProtocols ?? options.allowedProtocols
+    )
 
     if (!urlSafe) {
       return {
@@ -303,18 +370,6 @@ export function validateAttribute(
         attrName: normalized,
         attrValue,
         reason: `Dangerous URL protocol in attribute ${normalized}`,
-      }
-    }
-
-    // Sanitize URL (remove dangerous protocols)
-    const sanitized = sanitizeURL(attrValue, options.allowedProtocols, '')
-
-    if (sanitized !== attrValue) {
-      return {
-        allowed: true,
-        attrName: normalized,
-        attrValue,
-        sanitizedValue: sanitized,
       }
     }
   }

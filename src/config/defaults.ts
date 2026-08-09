@@ -6,6 +6,7 @@
  */
 
 import type { SanitizeOptions } from '../types.js'
+import { deepFreeze } from '../utils/object.js'
 import {
   DEFAULT_ALLOWED_TAGS,
   DEFAULT_ALLOWED_ATTRIBUTES,
@@ -26,7 +27,7 @@ import {
  * - Denies id/class attributes by default (CSS collision)
  * - Denies style attribute by default (CSS injection)
  */
-export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = {
+export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
   // Tags and attributes
   allowedTags: [...DEFAULT_ALLOWED_TAGS],
   allowedAttributes: Object.fromEntries(
@@ -44,14 +45,14 @@ export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = {
   allowStyleAttribute: false, // Security: style can have CSS injection
 
   // Behavior
-  stripTags: false, // Remove tags entirely (don't keep text content)
-  keepTextContent: true, // Keep text content when removing dangerous tags
+  stripTags: false, // Keep wrappers for allowed elements
+  keepTextContent: true, // Unwrap denied safe elements and keep sanitized children
   lowercaseTags: true, // Normalize tag names to lowercase
   lowercaseAttributes: true, // Normalize attribute names to lowercase
   returnString: true, // Return sanitized HTML as string (not DocumentFragment)
 
   // Advanced security (Phase 2)
   preventDOMClobbering: false, // Phase 2 feature
-  detectMXSS: false, // Phase 2 feature
+  detectMXSS: false, // Experimental feature
   strictCSSValidation: false, // Phase 2 feature
-} as const
+})

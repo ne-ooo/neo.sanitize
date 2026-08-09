@@ -17,6 +17,8 @@
  * - https://domclob.xyz/domc_wiki/
  */
 
+import { deepFreeze } from '../utils/object.js'
+
 /**
  * DOM properties that should never be clobbered
  *
@@ -26,7 +28,7 @@
  * - Common framework properties (React, Vue, Angular)
  * - Browser APIs (fetch, localStorage, etc.)
  */
-export const DANGEROUS_IDS: readonly string[] = [
+export const DANGEROUS_IDS: readonly string[] = deepFreeze([
   // Document APIs
   'createElement',
   'createElementNS',
@@ -106,7 +108,7 @@ export const DANGEROUS_IDS: readonly string[] = [
   'propertyIsEnumerable',
   'toString',
   'valueOf',
-]
+])
 
 /**
  * Dangerous name attributes for form elements
@@ -114,7 +116,7 @@ export const DANGEROUS_IDS: readonly string[] = [
  * Form elements with these names can clobber form.elements[name]
  * and potentially override important properties.
  */
-export const DANGEROUS_NAMES: readonly string[] = [
+export const DANGEROUS_NAMES: readonly string[] = deepFreeze([
   // Form API clobbering
   'submit',
   'reset',
@@ -142,7 +144,7 @@ export const DANGEROUS_NAMES: readonly string[] = [
 
   // Include all dangerous IDs as dangerous names too
   ...DANGEROUS_IDS,
-]
+])
 
 /**
  * Tags that are particularly dangerous for DOM clobbering
@@ -153,7 +155,7 @@ export const DANGEROUS_NAMES: readonly string[] = [
  * - embed: Can clobber via name attribute
  * - object: Can clobber via name attribute
  */
-export const DOM_CLOBBERING_TAGS: readonly string[] = [
+export const DOM_CLOBBERING_TAGS: readonly string[] = deepFreeze([
   'form',
   'iframe',
   'img',
@@ -163,7 +165,11 @@ export const DOM_CLOBBERING_TAGS: readonly string[] = [
   'button',
   'select',
   'textarea',
-]
+])
+
+const DANGEROUS_ID_SET = new Set(DANGEROUS_IDS.map((id) => id.toLowerCase()))
+const DANGEROUS_NAME_SET = new Set(DANGEROUS_NAMES.map((name) => name.toLowerCase()))
+const DOM_CLOBBERING_TAG_SET = new Set(DOM_CLOBBERING_TAGS)
 
 /**
  * Check if an id value could cause DOM clobbering
@@ -183,9 +189,7 @@ export function isDangerousId(id: string): boolean {
   const normalized = id.toLowerCase().trim()
 
   // Check against known dangerous IDs
-  return DANGEROUS_IDS.some((dangerousId) => {
-    return normalized === dangerousId.toLowerCase()
-  })
+  return DANGEROUS_ID_SET.has(normalized)
 }
 
 /**
@@ -208,19 +212,15 @@ export function isDangerousName(name: string, tagName: string = ''): boolean {
   const normalizedTag = tagName.toLowerCase()
 
   // Form elements are particularly dangerous
-  const isFormElement = DOM_CLOBBERING_TAGS.includes(normalizedTag)
+  const isFormElement = DOM_CLOBBERING_TAG_SET.has(normalizedTag)
 
   if (isFormElement) {
     // Check against known dangerous names
-    return DANGEROUS_NAMES.some((dangerousName) => {
-      return normalized === dangerousName.toLowerCase()
-    })
+    return DANGEROUS_NAME_SET.has(normalized)
   }
 
   // For non-form elements, only check against critical IDs
-  return DANGEROUS_IDS.some((dangerousId) => {
-    return normalized === dangerousId.toLowerCase()
-  })
+  return DANGEROUS_ID_SET.has(normalized)
 }
 
 /**

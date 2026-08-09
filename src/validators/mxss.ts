@@ -1,7 +1,7 @@
 /**
- * @lpm.dev/neo.sanitize - Mutation XSS (mXSS) Detection
+ * @lpm.dev/neo.sanitize - Experimental Mutation XSS (mXSS) Defense
  *
- * Detects and prevents mutation XSS attacks where the browser's HTML parser
+ * Provides experimental defenses for attacks where the browser's HTML parser
  * mutates the HTML in a way that creates vulnerabilities after sanitization.
  *
  * mXSS occurs when:
@@ -22,6 +22,11 @@
  * - https://cure53.de/fp170.pdf (mXSS paper by Heiderich et al.)
  * - https://research.securitum.com/mutation-xss-via-mathml-mutation-dompurify-2-0-17-bypass/
  */
+
+import { deepFreeze } from '../utils/object.js'
+
+const ELEMENT_NODE = 1
+const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
 
 /**
  * Forbidden tag nesting patterns that can cause mXSS
@@ -51,7 +56,7 @@ export interface ForbiddenNesting {
  *
  * Each pattern represents a known mXSS vector.
  */
-export const FORBIDDEN_NESTING_PATTERNS: readonly ForbiddenNesting[] = [
+export const FORBIDDEN_NESTING_PATTERNS: readonly ForbiddenNesting[] = deepFreeze([
   {
     parent: 'svg',
     forbiddenChildren: ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li'],
@@ -87,7 +92,7 @@ export const FORBIDDEN_NESTING_PATTERNS: readonly ForbiddenNesting[] = [
     forbiddenChildren: ['form'],
     reason: 'Nested forms cause unexpected behavior',
   },
-]
+])
 
 /**
  * Tags that change parsing context (namespace)
@@ -95,21 +100,33 @@ export const FORBIDDEN_NESTING_PATTERNS: readonly ForbiddenNesting[] = [
  * These tags switch between HTML, SVG, and MathML contexts,
  * which can lead to mXSS if not handled carefully.
  */
-export const NAMESPACE_SWITCHING_TAGS: readonly string[] = [
+export const NAMESPACE_SWITCHING_TAGS: readonly string[] = deepFreeze([
   'svg',
   'math',
-]
+])
 
 /**
  * Tags that are particularly dangerous in combination with namespace switching
  */
-export const DANGEROUS_IN_FOREIGN_CONTEXT: readonly string[] = [
+export const DANGEROUS_IN_FOREIGN_CONTEXT: readonly string[] = deepFreeze([
   'script',
   'style',
   'title',
   'textarea',
   'xmp',
-]
+])
+
+const NAMESPACE_SWITCHING_TAG_SET = new Set(NAMESPACE_SWITCHING_TAGS)
+const DANGEROUS_FOREIGN_TAG_SET = new Set(DANGEROUS_IN_FOREIGN_CONTEXT)
+const FORBIDDEN_NESTING_MAP = new Map<string, Map<string, string>>()
+
+for (const pattern of FORBIDDEN_NESTING_PATTERNS) {
+  const children = new Map<string, string>()
+  for (const child of pattern.forbiddenChildren) {
+    children.set(child, pattern.reason)
+  }
+  FORBIDDEN_NESTING_MAP.set(pattern.parent, children)
+}
 
 /**
  * Check if a tag nesting is forbidden (mXSS risk)
@@ -126,15 +143,8 @@ export function isForbiddenNesting(
   parentTag: string,
   childTag: string
 ): { forbidden: boolean; reason?: string } {
-  // Check against forbidden nesting patterns
-  for (const pattern of FORBIDDEN_NESTING_PATTERNS) {
-    if (pattern.parent === parentTag && pattern.forbiddenChildren.includes(childTag)) {
-      return {
-        forbidden: true,
-        reason: pattern.reason,
-      }
-    }
-  }
+  const reason = FORBIDDEN_NESTING_MAP.get(parentTag)?.get(childTag)
+  if (reason) return { forbidden: true, reason }
 
   return { forbidden: false }
 }
@@ -151,7 +161,7 @@ export function isForbiddenNesting(
  * isNamespaceSwitchingTag('div')  // false
  */
 export function isNamespaceSwitchingTag(tagName: string): boolean {
-  return NAMESPACE_SWITCHING_TAGS.includes(tagName)
+  return NAMESPACE_SWITCHING_TAG_SET.has(tagName)
 }
 
 /**
@@ -166,7 +176,20 @@ export function isNamespaceSwitchingTag(tagName: string): boolean {
  * isDangerousInForeignContext('div')  // false
  */
 export function isDangerousInForeignContext(tagName: string): boolean {
-  return DANGEROUS_IN_FOREIGN_CONTEXT.includes(tagName)
+  return DANGEROUS_FOREIGN_TAG_SET.has(tagName)
+}
+
+/**
+ * Check if an element uses SVG, MathML, or another foreign namespace.
+ */
+export function isForeignNamespace(element: Element): boolean {
+  const tagName = element.tagName.toLowerCase()
+  const namespace = element.namespaceURI
+
+  return (
+    isNamespaceSwitchingTag(tagName) ||
+    (namespace !== null && namespace !== '' && namespace !== HTML_NAMESPACE)
+  )
 }
 
 /**
@@ -201,12 +224,21 @@ export function validateMXSS(
 
   // Recursive function to check nesting
   function checkNode(currentNode: Node, parentTag: string | null = null): void {
-    if (currentNode.nodeType !== Node.ELEMENT_NODE) {
+    if (currentNode.nodeType !== ELEMENT_NODE) {
       return
     }
 
     const element = currentNode as Element
     const tagName = element.tagName.toLowerCase()
+
+    if (isForeignNamespace(element)) {
+      forbiddenPatterns.push({
+        parent: element.namespaceURI ?? 'unknown',
+        child: tagName,
+        reason: `Foreign namespace detected: ${element.namespaceURI ?? tagName}`,
+      })
+      return
+    }
 
     // Check if parent/child nesting is forbidden
     if (parentTag) {
@@ -221,16 +253,18 @@ export function validateMXSS(
     }
 
     // Check children recursively
-    const children = Array.from(element.childNodes)
-    for (const child of children) {
+    let child = element.firstChild
+    while (child) {
       checkNode(child, tagName)
+      child = child.nextSibling
     }
   }
 
   // Start checking from root
-  const children = Array.from(node.childNodes)
-  for (const child of children) {
+  let child = node.firstChild
+  while (child) {
     checkNode(child, null)
+    child = child.nextSibling
   }
 
   // Return result
@@ -269,12 +303,22 @@ export function sanitizeMXSS(node: Node, detectMXSS: boolean = false): number {
 
   // Recursive function to remove forbidden nesting
   function checkAndRemove(currentNode: Node, parentTag: string | null = null): void {
-    if (currentNode.nodeType !== Node.ELEMENT_NODE) {
+    if (currentNode.nodeType !== ELEMENT_NODE) {
       return
     }
 
     const element = currentNode as Element
     const tagName = element.tagName.toLowerCase()
+
+    // Foreign namespaces change HTML parsing rules. Remove the complete
+    // subtree even when a custom tag allowlist contains svg or math.
+    if (isForeignNamespace(element)) {
+      if (element.parentNode) {
+        element.parentNode.removeChild(element)
+        removedCount++
+      }
+      return
+    }
 
     // Check if parent/child nesting is forbidden
     if (parentTag) {
@@ -290,16 +334,20 @@ export function sanitizeMXSS(node: Node, detectMXSS: boolean = false): number {
     }
 
     // Check children recursively
-    const children = Array.from(element.childNodes)
-    for (const child of children) {
+    let child = element.firstChild
+    while (child) {
+      const next = child.nextSibling
       checkAndRemove(child, tagName)
+      child = next
     }
   }
 
   // Start checking from root
-  const children = Array.from(node.childNodes)
-  for (const child of children) {
+  let child = node.firstChild
+  while (child) {
+    const next = child.nextSibling
     checkAndRemove(child, null)
+    child = next
   }
 
   return removedCount

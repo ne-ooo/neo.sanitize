@@ -5,6 +5,8 @@
  * Based on OWASP guidelines and common XSS attack vectors.
  */
 
+import { deepFreeze } from './object.js'
+
 /**
  * Default allowed HTML tags (safe for basic formatting)
  *
@@ -14,7 +16,7 @@
  * - <form>, <input>, <button> (phishing, CSRF)
  * - <base> (URL hijacking)
  */
-export const DEFAULT_ALLOWED_TAGS: readonly string[] = [
+export const DEFAULT_ALLOWED_TAGS: readonly string[] = deepFreeze([
   // Text formatting
   'p',
   'br',
@@ -87,7 +89,7 @@ export const DEFAULT_ALLOWED_TAGS: readonly string[] = [
 
   // Horizontal rule
   'hr',
-] as const
+])
 
 /**
  * Default allowed attributes per tag
@@ -97,7 +99,7 @@ export const DEFAULT_ALLOWED_TAGS: readonly string[] = [
  * - alt/title: Safe text content
  * - class/id: Only if explicitly enabled
  */
-export const DEFAULT_ALLOWED_ATTRIBUTES: Readonly<Record<string, readonly string[]>> = {
+export const DEFAULT_ALLOWED_ATTRIBUTES: Readonly<Record<string, readonly string[]>> = deepFreeze({
   a: ['href', 'title', 'rel', 'target'],
   img: ['src', 'alt', 'title', 'width', 'height'],
   table: ['width', 'border', 'cellpadding', 'cellspacing'],
@@ -111,7 +113,7 @@ export const DEFAULT_ALLOWED_ATTRIBUTES: Readonly<Record<string, readonly string
   abbr: ['title'],
   col: ['span', 'width'],
   colgroup: ['span', 'width'],
-} as const
+})
 
 /**
  * Forbidden attributes (always removed, regardless of tag)
@@ -121,7 +123,7 @@ export const DEFAULT_ALLOWED_ATTRIBUTES: Readonly<Record<string, readonly string
  * - Script-related: onfocus, onblur, onchange, etc.
  * - Form-related: onsubmit, onreset, etc.
  */
-export const FORBIDDEN_ATTRIBUTES: readonly string[] = [
+export const FORBIDDEN_ATTRIBUTES: readonly string[] = deepFreeze([
   // Mouse events
   'onclick',
   'ondblclick',
@@ -234,7 +236,7 @@ export const FORBIDDEN_ATTRIBUTES: readonly string[] = [
   'action', // Form action URL
   'data', // <object> data URL
   'ping', // <a> ping tracking
-] as const
+])
 
 /**
  * Allowed URL protocols for href, src, and similar attributes
@@ -252,14 +254,14 @@ export const FORBIDDEN_ATTRIBUTES: readonly string[] = [
  * - file: Local file access
  * - about: Browser internals
  */
-export const ALLOWED_PROTOCOLS: readonly string[] = [
+export const ALLOWED_PROTOCOLS: readonly string[] = deepFreeze([
   'http',
   'https',
   'mailto',
   'tel',
   'ftp',
   'ftps',
-] as const
+])
 
 /**
  * Dangerous URL protocols (always blocked)
@@ -271,13 +273,13 @@ export const ALLOWED_PROTOCOLS: readonly string[] = [
  * - about: Access to browser internals
  * - file: Access to local file system
  */
-export const DANGEROUS_PROTOCOLS: readonly string[] = [
+export const DANGEROUS_PROTOCOLS: readonly string[] = deepFreeze([
   'javascript',
   'data',
   'vbscript',
   'about',
   'file',
-] as const
+])
 
 /**
  * Void elements (self-closing, have no content)
@@ -287,7 +289,7 @@ export const DANGEROUS_PROTOCOLS: readonly string[] = [
  *
  * Important for parsing and serialization.
  */
-export const VOID_ELEMENTS: readonly string[] = [
+export const VOID_ELEMENTS: readonly string[] = deepFreeze([
   'area',
   'base',
   'br',
@@ -302,7 +304,7 @@ export const VOID_ELEMENTS: readonly string[] = [
   'source',
   'track',
   'wbr',
-] as const
+])
 
 /**
  * Attributes that accept URLs and require protocol validation
@@ -316,7 +318,7 @@ export const VOID_ELEMENTS: readonly string[] = [
  * - data: Object data
  * - poster: Video posters
  */
-export const URL_ATTRIBUTES: readonly string[] = [
+export const URL_ATTRIBUTES: readonly string[] = deepFreeze([
   'href',
   'src',
   'action',
@@ -328,7 +330,9 @@ export const URL_ATTRIBUTES: readonly string[] = [
   'lowsrc',
   'ping',
   'srcset',
-] as const
+  'imagesrcset',
+  'attributionsrc',
+])
 
 /**
  * Regular expression to match event handler attributes
@@ -365,11 +369,11 @@ export const ARIA_ATTRIBUTE_REGEX = /^aria-[\w-]+$/i
  *
  * Used when stripping tags but keeping text content.
  */
-export const HTML_ENTITIES: Readonly<Record<string, string>> = {
+export const HTML_ENTITIES: Readonly<Record<string, string>> = deepFreeze({
   '&': '&amp;',
   '<': '&lt;',
   '>': '&gt;',
   '"': '&quot;',
   "'": '&#x27;',
   '/': '&#x2F;',
-} as const
+})

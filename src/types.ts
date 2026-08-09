@@ -75,7 +75,7 @@ export interface SanitizeOptions {
 
   /**
    * Strip tags instead of removing them entirely
-   * If true, <script>alert('xss')</script> becomes alert('xss')
+   * Safe child content remains, but dangerous element subtrees are removed.
    * @default false
    */
   stripTags?: boolean
@@ -112,7 +112,10 @@ export interface SanitizeOptions {
   preventDOMClobbering?: boolean
 
   /**
-   * Enable mXSS detection (Phase 2)
+   * Enable experimental mXSS defenses.
+   *
+   * This option removes foreign namespaces and checks parse stability.
+   * Its behavior can change before the next major release.
    * @default false
    */
   detectMXSS?: boolean
@@ -189,6 +192,24 @@ export interface Sanitizer {
    * Update configuration
    */
   updateConfig(options: Partial<SanitizeOptions>): void
+}
+
+/**
+ * Minimum parser interface required by a DOM runtime.
+ */
+export interface DOMParserLike {
+  parseFromString(html: string, mimeType: 'text/html'): Document
+}
+
+/**
+ * DOM APIs that the sanitizer requires outside a browser document.
+ *
+ * In Node.js, pass the `document` and `DOMParser` from the same DOM instance.
+ * Web Workers must supply an equivalent runtime.
+ */
+export interface DOMRuntime {
+  document: Document
+  DOMParser: new () => DOMParserLike
 }
 
 /**

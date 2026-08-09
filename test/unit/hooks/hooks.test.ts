@@ -327,14 +327,27 @@ describe('Hooks System', () => {
       sanitize(html, { hooks })
     })
 
+    it('preserves a fragment retained by a DOM hook', () => {
+      let retained: DocumentFragment | undefined
+      const result = sanitize('<p>Safe</p>', {
+        hooks: {
+          afterSanitize(fragment) {
+            retained = fragment
+          },
+        },
+      })
+
+      expect(result).toBe('<p>Safe</p>')
+      expect(retained?.querySelector('p')?.textContent).toBe('Safe')
+    })
+
     it('should work with returnString option', () => {
       const hooks: SanitizeHooks = {
         afterSanitize(fragment) {
-          // Add metadata
-          const meta = document.createElement('meta')
-          meta.setAttribute('name', 'sanitized')
-          meta.setAttribute('content', 'true')
-          fragment.appendChild(meta)
+          const marker = document.createElement('span')
+          marker.setAttribute('title', 'sanitized')
+          marker.textContent = 'Done'
+          fragment.appendChild(marker)
           return fragment
         },
       }
@@ -343,10 +356,98 @@ describe('Hooks System', () => {
       const result = sanitize(html, {
         hooks,
         returnString: true,
+        allowedAttributes: { span: ['title'] },
       })
 
       expect(typeof result).toBe('string')
-      expect(result).toContain('name="sanitized"')
+      expect(result).toContain('<span title="sanitized">Done</span>')
+    })
+
+    it('revalidates dangerous nodes and attributes added by the hook', () => {
+      const hooks: SanitizeHooks = {
+        afterSanitize(fragment) {
+          const paragraph = fragment.querySelector('p')
+          paragraph?.setAttribute('onclick', 'alert(1)')
+
+          const script = document.createElement('script')
+          script.textContent = 'alert(2)'
+          fragment.appendChild(script)
+        },
+      }
+
+      const result = sanitize('<p>Safe</p>', { hooks })
+
+      expect(result).toBe('<p>Safe</p>')
+    })
+
+    it('revalidates a replacement fragment from another DOM realm', () => {
+      const otherDocument = document.implementation.createHTMLDocument('other')
+      const replacement = otherDocument.createDocumentFragment()
+      const link = otherDocument.createElement('a')
+      link.setAttribute('href', 'javascript:alert(1)')
+      link.textContent = 'Link'
+      replacement.appendChild(link)
+
+      const result = sanitize('<p>Original</p>', {
+        hooks: {
+          afterSanitize() {
+            return replacement
+          },
+        },
+      })
+
+      expect(result).toBe('<a>Link</a>')
+    })
+  })
+
+  describe('hook mutation revalidation', () => {
+    it('removes attributes added by onAttribute after the attribute snapshot', () => {
+      const result = sanitize('<a href="https://example.com">Link</a>', {
+        hooks: {
+          onAttribute(element) {
+            element.setAttribute('onclick', 'alert(1)')
+            element.setAttribute('href', 'javascript:alert(2)')
+          },
+        },
+      })
+
+      expect(result).toBe('<a>Link</a>')
+    })
+
+    it('removes descendants added by onElement', () => {
+      const result = sanitize('<div>Safe</div>', {
+        hooks: {
+          onElement(element) {
+            if (element.tagName.toLowerCase() === 'div') {
+              const script = document.createElement('script')
+              script.textContent = 'alert(1)'
+              element.appendChild(script)
+            }
+          },
+        },
+      })
+
+      expect(result).toBe('<div>Safe</div>')
+    })
+
+    it('calls traversal hooks only once per original node', () => {
+      let elementCalls = 0
+      let attributeCalls = 0
+
+      sanitize('<p title="Safe">Text</p>', {
+        allowedAttributes: { p: ['title'] },
+        hooks: {
+          onElement() {
+            elementCalls++
+          },
+          onAttribute() {
+            attributeCalls++
+          },
+        },
+      })
+
+      expect(elementCalls).toBe(1)
+      expect(attributeCalls).toBe(1)
     })
   })
 

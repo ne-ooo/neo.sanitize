@@ -52,6 +52,16 @@ describe('CSS Injection Prevention', () => {
       expect(hasDangerousCSS("background: url('javascript:alert(1)')").dangerous).toBe(true)
     })
 
+    it('should detect escaped and commented javascript: URLs', () => {
+      expect(hasDangerousCSS('background: url(jav\\61script:alert(1))').dangerous).toBe(true)
+      expect(hasDangerousCSS('background: u\\72l(ja/**/vascript:alert(1))').dangerous).toBe(true)
+    })
+
+    it('should detect escaped expression() and @import tokens', () => {
+      expect(hasDangerousCSS('width: \\65xpression(alert(1))').dangerous).toBe(true)
+      expect(hasDangerousCSS('@\\69mport url(https://evil.test/x.css)').dangerous).toBe(true)
+    })
+
     it('should detect data: protocol in url()', () => {
       const result = hasDangerousCSS('background: url(data:text/html,<script>alert(1)</script>)')
       expect(result.dangerous).toBe(true)
@@ -159,6 +169,33 @@ describe('CSS Injection Prevention', () => {
       expect(result).toBe(css)
     })
 
+    it('should preserve semicolons inside a safe quoted URL', () => {
+      const css = 'background-image: url("https://safe.test/a;b.png"); color: red'
+      expect(sanitizeCSS(css)).toBe(css)
+    })
+
+    it('should remove escaped dangerous URL declarations', () => {
+      const css = 'color: red; background-image: url(jav\\61script:alert(1)); width: 100px'
+      const result = sanitizeCSS(css)
+      expect(result).toBe('color: red; width: 100px')
+    })
+
+    it('should reject indirect resource functions', () => {
+      const css = 'color: red; background: image-set("https://evil.test/a.png" 1x)'
+      expect(sanitizeCSS(css)).toBe('color: red')
+    })
+
+    it('should fail closed for malformed CSS', () => {
+      expect(sanitizeCSS('color: red; background: url(https://safe.test')).toBe('')
+      expect(sanitizeCSS('color: red\\')).toBe('')
+      expect(sanitizeCSS('color: red; /* unterminated')).toBe('')
+    })
+
+    it('should fail closed for excessive function nesting', () => {
+      const css = `width: ${'calc('.repeat(65)}1px${')'.repeat(65)}`
+      expect(sanitizeCSS(css)).toBe('')
+    })
+
     it('should handle multiple properties', () => {
       const css = 'color: red; behavior: url(xss.htc); background: blue; -moz-binding: url(xss.xml)'
       const result = sanitizeCSS(css)
@@ -191,6 +228,16 @@ describe('CSS Injection Prevention', () => {
       const result = sanitizeCSS(css, true)
       // expression() makes entire CSS dangerous
       expect(result).toBe('')
+    })
+
+    it('should reject all remote and relative url() values', () => {
+      const css = 'color: red; background-image: url(https://evil.test/track); cursor: url(/cursor.cur), auto'
+      expect(sanitizeCSS(css, true)).toBe('color: red')
+    })
+
+    it('should reject dynamic values that can defer security decisions', () => {
+      const css = 'color: var(--attacker-color); width: 100px'
+      expect(sanitizeCSS(css, true)).toBe('width: 100px')
     })
   })
 
@@ -346,6 +393,18 @@ describe('CSS Injection Prevention', () => {
       })
       expect(result).toContain('color: red')
       expect(result).not.toContain('-webkit-unknown')
+    })
+
+    it('should remove strict CSS URLs from style attributes', () => {
+      const html = '<div style="color: red; background-image: url(https://evil.test/track)">Text</div>'
+      const result = sanitize(html, {
+        allowStyleAttribute: true,
+        strictCSSValidation: true
+      })
+
+      expect(result).toContain('color: red')
+      expect(result).not.toContain('url(')
+      expect(result).not.toContain('evil.test')
     })
   })
 })

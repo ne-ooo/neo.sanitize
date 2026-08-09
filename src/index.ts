@@ -26,7 +26,7 @@
 export { sanitize, createSanitizer, sanitizeBasic, sanitizeRelaxed, sanitizeStrict } from './core/sanitizer.js'
 
 // Parser functions
-export { parseHTML, serializeHTML, isBrowser, isNode } from './core/parser.js'
+export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from './core/parser.js'
 
 // Validators
 export {
@@ -37,6 +37,7 @@ export {
   validateProtocol,
   sanitizeURL,
   isSafeURL,
+  isSafeURLAttributeValue,
 } from './validators/protocols.js'
 
 export {
@@ -84,6 +85,8 @@ export {
 // TypeScript types
 export type {
   SanitizeOptions,
+  DOMParserLike,
+  DOMRuntime,
   SanitizeSchema,
   SanitizeResult,
   Sanitizer,

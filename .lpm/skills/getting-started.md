@@ -13,7 +13,9 @@ globs:
 
 ## Overview
 
-neo.sanitize is a zero-dependency HTML sanitization library for XSS prevention. Works in browsers and Node.js. Blocks script tags, event handlers (60+ variations), dangerous protocols, CSS injection, DOM clobbering, and mXSS patterns. TypeScript-first, tree-shakeable.
+neo.sanitize is a zero-dependency HTML sanitization library for XSS prevention. It uses browser DOM APIs or an explicit DOM runtime.
+
+The sanitizer removes script tags, event handlers, dangerous protocols, CSS injection, DOM clobbering, and mutation-XSS patterns.
 
 ## Quick Start
 
@@ -84,6 +86,10 @@ sanitize(html, {
 })
 ```
 
+The `allowedTags` option cannot enable active-content tags. Tags such as `script`, `style`, `iframe`, and `form` always stay blocked.
+
+Each URL in `srcset`, `imagesrcset`, `ping`, and `attributionsrc` must have an allowed protocol.
+
 ## createSanitizer — Reusable Instance
 
 ```typescript
@@ -100,12 +106,35 @@ const sanitizer = createSanitizer({
 sanitizer.sanitize(userComment1)
 sanitizer.sanitize(userComment2)
 
-// Inspect current config
+// Get a detached, frozen configuration snapshot
 const config = sanitizer.getConfig()
 
 // Update config dynamically
 sanitizer.updateConfig({ allowClassAttribute: true })
 ```
+
+`getConfig()` returns a detached, frozen snapshot. `updateConfig()` does not change earlier snapshots.
+
+## Node.js and Web Workers
+
+If the required DOM APIs are not global, Node.js and Web Workers must supply a compatible DOM runtime.
+
+```typescript
+import { JSDOM } from 'jsdom'
+import { sanitize } from '@lpm.dev/neo.sanitize'
+
+const dom = new JSDOM('')
+const runtime = {
+  document: dom.window.document,
+  DOMParser: dom.window.DOMParser,
+}
+
+sanitize(userHtml, {}, runtime)
+```
+
+Pass the runtime as the second argument to `createSanitizer`. The `document` and `DOMParser` must use the same DOM implementation.
+
+Pass the runtime as the second argument to a preset helper. Pass it to `parseHTML` as the second argument.
 
 ## What Gets Blocked
 
@@ -177,9 +206,12 @@ document.body.appendChild(fragment)  // DocumentFragment
 ## Text Content Behavior
 
 ```typescript
-// keepTextContent: true (default) — text from removed tags is preserved
+// keepTextContent: true (default) — safe removed elements are unwrapped
 sanitize('<div>Hello <script>evil()</script> World</div>')
 // '<div>Hello  World</div>'
+
+sanitize('<section><p>Hello <strong>World</strong></p></section>')
+// '<p>Hello <strong>World</strong></p>'
 
 // Dangerous tags (script, style, iframe) NEVER keep text content
 sanitize('<script>alert("XSS")</script>')
@@ -212,18 +244,20 @@ sanitize(html, {
 // - @import
 // - url(javascript:)
 // - url(data:)
+// - all url() and dynamic functions in strict mode
 // Only allows 70+ safe CSS properties (color, font-size, margin, etc.)
 ```
 
-### mXSS Detection
+### Experimental mXSS Defense
 
 ```typescript
 sanitize(html, { detectMXSS: true })
-// Detects and removes mutation XSS patterns:
-// - SVG/MathML with HTML block elements
-// - Nested forms
-// - template with script
+// Removes foreign namespaces, including SVG and MathML.
+// Sanitizes each reparsed result without hooks.
+// Returns empty output if three passes do not produce stable serialization.
 ```
+
+This option is experimental. Its behavior can change before the next major release.
 
 ## Schema Merging
 
@@ -251,6 +285,8 @@ sanitize(html, {
   }
 })
 ```
+
+The sanitizer calls each hook once. After `afterSanitize`, a hook-free pass checks all current nodes and attributes.
 
 ## Validator Utilities
 
@@ -289,6 +325,8 @@ import { BASIC_SCHEMA, RELAXED_SCHEMA, STRICT_SCHEMA } from '@lpm.dev/neo.saniti
 ```typescript
 import type {
   SanitizeOptions,
+  DOMParserLike,
+  DOMRuntime,
   SanitizeHooks,
   Sanitizer,
   TagValidationResult,

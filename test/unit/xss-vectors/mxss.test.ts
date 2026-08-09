@@ -16,10 +16,13 @@
 import { describe, it, expect } from 'vitest'
 import { sanitize } from '../../../src/core/sanitizer.js'
 import {
+  isForeignNamespace,
   isForbiddenNesting,
   isNamespaceSwitchingTag,
   isDangerousInForeignContext,
+  validateMXSS,
 } from '../../../src/validators/mxss.js'
+import type { DOMRuntime } from '../../../src/types.js'
 
 describe('Mutation XSS (mXSS) Detection', () => {
   describe('Forbidden nesting detection (policy logic)', () => {
@@ -168,6 +171,77 @@ describe('Mutation XSS (mXSS) Detection', () => {
       expect(result).not.toContain('<math>')
       // Text may remain depending on browser correction
       expect(result).toContain('Text')
+    })
+  })
+
+  describe('experimental mXSS defenses', () => {
+    it('detects foreign namespace elements', () => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      const fragment = document.createDocumentFragment()
+      fragment.appendChild(svg)
+
+      expect(isForeignNamespace(svg)).toBe(true)
+      expect(validateMXSS(fragment, true).hasMXSS).toBe(true)
+    })
+
+    it('removes SVG even when a custom allowlist includes it', () => {
+      const result = sanitize('<svg><circle></circle></svg><p>Safe</p>', {
+        allowedTags: ['svg', 'circle', 'p'],
+        detectMXSS: true,
+      })
+
+      expect(result).toBe('<p>Safe</p>')
+    })
+
+    it('removes MathML even when a custom allowlist includes it', () => {
+      const result = sanitize('<math><mi>x</mi></math><p>Safe</p>', {
+        allowedTags: ['math', 'mi', 'p'],
+        detectMXSS: true,
+      })
+
+      expect(result).toBe('<p>Safe</p>')
+    })
+
+    it('reparses output until serialization is stable', () => {
+      let parseCount = 0
+      const NativeDOMParser = DOMParser
+      class CountingDOMParser {
+        parseFromString(html: string, type: DOMParserSupportedType): Document {
+          parseCount++
+          return new NativeDOMParser().parseFromString(html, type)
+        }
+      }
+      const runtime: DOMRuntime = {
+        document,
+        DOMParser: CountingDOMParser as unknown as typeof DOMParser,
+      }
+
+      const result = sanitize('<p>Stable</p>', { detectMXSS: true }, runtime)
+
+      expect(result).toBe('<p>Stable</p>')
+      expect(parseCount).toBe(2)
+    })
+
+    it('fails closed after the parse stability limit', () => {
+      let parseCount = 0
+      const NativeDOMParser = DOMParser
+      class UnstableDOMParser {
+        parseFromString(html: string, type: DOMParserSupportedType): Document {
+          parseCount++
+          const parsed = new NativeDOMParser().parseFromString(html, type)
+          parsed.body.textContent = `cycle-${parseCount}`
+          return parsed
+        }
+      }
+      const runtime: DOMRuntime = {
+        document,
+        DOMParser: UnstableDOMParser as unknown as typeof DOMParser,
+      }
+
+      const result = sanitize('<p>Unstable</p>', { detectMXSS: true }, runtime)
+
+      expect(result).toBe('')
+      expect(parseCount).toBe(4)
     })
   })
 

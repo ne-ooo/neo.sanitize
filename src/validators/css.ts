@@ -14,46 +14,17 @@
  * - https://portswigger.net/web-security/cross-site-scripting/contexts#xss-in-html-tag-attributes
  */
 
-/**
- * Dangerous CSS patterns that invalidate entire CSS string
- *
- * These patterns make the entire CSS dangerous and should remove everything.
- */
-export const GLOBAL_DANGEROUS_PATTERNS: readonly RegExp[] = [
-  // CSS expression() - IE only, but still dangerous
-  /expression\s*\(/i,
-
-  // @import - can load external malicious CSS
-  /@import/i,
-]
-
-/**
- * Dangerous CSS patterns in property values
- *
- * These are checked per-property and just that property is removed.
- */
-export const VALUE_DANGEROUS_PATTERNS: readonly RegExp[] = [
-  // javascript: protocol in url()
-  /url\s*\(\s*['"]*javascript:/i,
-
-  // data: protocol in url() (can contain scripts)
-  /url\s*\(\s*['"]*data:/i,
-
-  // vbscript: protocol
-  /url\s*\(\s*['"]*vbscript:/i,
-
-  // expression() in values
-  /expression\s*\(/i,
-]
+import { isSafeURL } from './protocols.js'
+import { deepFreeze } from '../utils/object.js'
 
 /**
  * Dangerous CSS properties that should be blocked
  */
-export const FORBIDDEN_CSS_PROPERTIES: readonly string[] = [
+export const FORBIDDEN_CSS_PROPERTIES: readonly string[] = deepFreeze([
   'behavior',        // IE HTC files
   '-moz-binding',    // Firefox XBL
   'binding',         // Generic binding
-]
+])
 
 /**
  * Safe CSS properties whitelist (for strict mode)
@@ -61,7 +32,7 @@ export const FORBIDDEN_CSS_PROPERTIES: readonly string[] = [
  * If provided, ONLY these properties are allowed.
  * Most applications don't need this level of restriction.
  */
-export const SAFE_CSS_PROPERTIES: readonly string[] = [
+export const SAFE_CSS_PROPERTIES: readonly string[] = deepFreeze([
   // Layout
   'display',
   'position',
@@ -183,98 +154,406 @@ export const SAFE_CSS_PROPERTIES: readonly string[] = [
   'outline',
   'box-shadow',
   'vertical-align',
+])
+
+interface CSSDeclaration {
+  property: string
+  value: string
+}
+
+interface CSSFunctionToken {
+  name: string
+  argument: string
+}
+
+interface CSSCheckResult {
+  dangerous: boolean
+  reason?: string
+}
+
+const CSS_URL_PROTOCOLS: readonly string[] = ['http', 'https']
+const MAX_CSS_NESTING = 64
+const MAX_CSS_FUNCTIONS = 256
+const INVALID_FUNCTION_TOKEN = '__invalid_css__'
+const STRICT_DYNAMIC_FUNCTIONS: readonly string[] = ['var', 'env', 'attr']
+const RESOURCE_FUNCTIONS: readonly string[] = [
+  'image',
+  'image-set',
+  '-webkit-image-set',
+  'cross-fade',
+  'element',
+  'paint',
 ]
+const FORBIDDEN_CSS_PROPERTY_SET = new Set(FORBIDDEN_CSS_PROPERTIES)
+const SAFE_CSS_PROPERTY_SET = new Set(SAFE_CSS_PROPERTIES)
+const STRICT_DYNAMIC_FUNCTION_SET = new Set(STRICT_DYNAMIC_FUNCTIONS)
+const RESOURCE_FUNCTION_SET = new Set(RESOURCE_FUNCTIONS)
 
-/**
- * Check if CSS contains globally dangerous patterns
- *
- * These patterns invalidate the entire CSS string.
- *
- * @param css - CSS string to validate
- * @returns Validation result with details
- *
- * @example
- * hasGloballyDangerousCSS('@import url(evil.css)')  // { dangerous: true }
- * hasGloballyDangerousCSS('color: red')  // { dangerous: false }
- */
-export function hasGloballyDangerousCSS(
-  css: string
-): { dangerous: boolean; reason?: string; pattern?: RegExp } {
-  if (!css || typeof css !== 'string') {
-    return { dangerous: false }
+function isHexDigit(character: string): boolean {
+  const code = character.charCodeAt(0)
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 70) ||
+    (code >= 97 && code <= 102)
+  )
+}
+
+function isWhitespace(character: string): boolean {
+  return character === ' ' || character === '\t' || character === '\n' || character === '\f' || character === '\r'
+}
+
+function consumeEscape(input: string, start: number): { value: string; next: number } {
+  const first = input[start + 1]
+  if (first === undefined) return { value: '', next: input.length }
+
+  // A backslash followed by a newline is a CSS line continuation.
+  if (first === '\n' || first === '\f' || first === '\r') {
+    const next = first === '\r' && input[start + 2] === '\n' ? start + 3 : start + 2
+    return { value: '', next }
   }
 
-  // Check against globally dangerous patterns
-  for (const pattern of GLOBAL_DANGEROUS_PATTERNS) {
-    if (pattern.test(css)) {
-      return {
-        dangerous: true,
-        reason: `Dangerous CSS pattern detected: ${pattern.source}`,
-        pattern,
+  if (!isHexDigit(first)) {
+    return { value: first, next: start + 2 }
+  }
+
+  let end = start + 1
+  while (end < input.length && end < start + 7 && isHexDigit(input[end] ?? '')) {
+    end++
+  }
+
+  const codePoint = Number.parseInt(input.slice(start + 1, end), 16)
+  if (isWhitespace(input[end] ?? '')) end++
+
+  const validCodePoint = codePoint !== 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+  return {
+    value: validCodePoint ? String.fromCodePoint(codePoint) : '\uFFFD',
+    next: end,
+  }
+}
+
+/** Decode CSS escapes and remove comments before security analysis. */
+function canonicalizeCSS(input: string): { value: string; valid: boolean } {
+  let output = ''
+  let index = 0
+
+  while (index < input.length) {
+    const character = input[index] ?? ''
+
+    if (character === '/' && input[index + 1] === '*') {
+      const commentEnd = input.indexOf('*/', index + 2)
+      if (commentEnd === -1) return { value: output, valid: false }
+      index = commentEnd + 2
+      continue
+    }
+
+    if (character === '\\') {
+      if (index + 1 >= input.length) return { value: output, valid: false }
+      const escape = consumeEscape(input, index)
+      output += escape.value
+      index = escape.next
+      continue
+    }
+
+    output += character
+    index++
+  }
+
+  return { value: output, valid: true }
+}
+
+function skipRawEscape(input: string, start: number): number {
+  return consumeEscape(input, start).next
+}
+
+/** Split declarations without treating quoted or parenthesized semicolons as separators. */
+function splitCSSDeclarations(css: string): CSSDeclaration[] | null {
+  const segments: string[] = []
+  let segmentStart = 0
+  let quote: '"' | "'" | null = null
+  let depth = 0
+
+  for (let index = 0; index < css.length; index++) {
+    const character = css[index] ?? ''
+
+    if (character === '\\') {
+      if (index + 1 >= css.length) return null
+      index = skipRawEscape(css, index) - 1
+      continue
+    }
+
+    if (quote) {
+      if (character === quote) quote = null
+      continue
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+
+    if (character === '/' && css[index + 1] === '*') {
+      const commentEnd = css.indexOf('*/', index + 2)
+      if (commentEnd === -1) return null
+      index = commentEnd + 1
+      continue
+    }
+
+    if (character === '(') {
+      depth++
+      if (depth > MAX_CSS_NESTING) return null
+      continue
+    }
+
+    if (character === ')') {
+      if (depth === 0) return null
+      depth--
+      continue
+    }
+
+    if (character === ';' && depth === 0) {
+      segments.push(css.slice(segmentStart, index))
+      segmentStart = index + 1
+    }
+  }
+
+  if (quote || depth !== 0) return null
+  segments.push(css.slice(segmentStart))
+
+  const declarations: CSSDeclaration[] = []
+  for (const segment of segments) {
+    const declaration = segment.trim()
+    if (!declaration) continue
+
+    let colonIndex = -1
+    quote = null
+    depth = 0
+
+    for (let index = 0; index < declaration.length; index++) {
+      const character = declaration[index] ?? ''
+
+      if (character === '\\') {
+        if (index + 1 >= declaration.length) return null
+        index = skipRawEscape(declaration, index) - 1
+        continue
       }
+
+      if (quote) {
+        if (character === quote) quote = null
+        continue
+      }
+
+      if (character === '"' || character === "'") {
+        quote = character
+        continue
+      }
+
+      if (character === '/' && declaration[index + 1] === '*') {
+        const commentEnd = declaration.indexOf('*/', index + 2)
+        if (commentEnd === -1) return null
+        index = commentEnd + 1
+        continue
+      }
+
+      if (character === '(') depth++
+      else if (character === ')') depth--
+      else if (character === ':' && depth === 0) {
+        colonIndex = index
+        break
+      }
+    }
+
+    if (colonIndex <= 0) continue
+
+    const property = declaration.slice(0, colonIndex).trim()
+    const value = declaration.slice(colonIndex + 1).trim()
+    if (property && value) declarations.push({ property, value })
+  }
+
+  return declarations
+}
+
+function isIdentifierCharacter(character: string): boolean {
+  const code = character.charCodeAt(0)
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    character === '-' ||
+    character === '_' ||
+    code >= 0x80
+  )
+}
+
+/** Tokenize CSS functions while respecting strings and balanced parentheses. */
+function getCSSFunctions(input: string, nesting: number = 0): CSSFunctionToken[] {
+  if (nesting > MAX_CSS_NESTING) {
+    return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
+  }
+
+  const functions: CSSFunctionToken[] = []
+  let index = 0
+
+  while (index < input.length) {
+    const character = input[index] ?? ''
+
+    if (character === '"' || character === "'") {
+      const quote = character
+      index++
+      while (index < input.length && input[index] !== quote) index++
+      index++
+      continue
+    }
+
+    if (!isIdentifierCharacter(character)) {
+      index++
+      continue
+    }
+
+    const nameStart = index
+    while (index < input.length && isIdentifierCharacter(input[index] ?? '')) index++
+    const name = input.slice(nameStart, index).toLowerCase()
+
+    while (index < input.length && isWhitespace(input[index] ?? '')) index++
+    if (input[index] !== '(') continue
+
+    const argumentStart = ++index
+    let depth = 1
+    let quote: '"' | "'" | null = null
+
+    while (index < input.length && depth > 0) {
+      const nested = input[index] ?? ''
+      if (quote) {
+        if (nested === quote) quote = null
+      } else if (nested === '"' || nested === "'") {
+        quote = nested
+      } else if (nested === '(') {
+        depth++
+      } else if (nested === ')') {
+        depth--
+      }
+      index++
+    }
+
+    const argumentEnd = depth === 0 ? index - 1 : input.length
+    const argument = input.slice(argumentStart, argumentEnd)
+    functions.push({ name, argument })
+    if (functions.length >= MAX_CSS_FUNCTIONS) {
+      return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
+    }
+
+    if (name !== 'url') {
+      for (const nestedFunction of getCSSFunctions(argument, nesting + 1)) {
+        functions.push(nestedFunction)
+        if (functions.length >= MAX_CSS_FUNCTIONS) {
+          return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
+        }
+      }
+    }
+  }
+
+  return functions
+}
+
+function hasImportAtRule(input: string): boolean {
+  const lower = input.toLowerCase()
+
+  for (let index = 0; index < lower.length; index++) {
+    if (lower[index] !== '@') continue
+    index++
+    while (index < lower.length && isWhitespace(lower[index] ?? '')) index++
+
+    const start = index
+    while (index < lower.length && isIdentifierCharacter(lower[index] ?? '')) index++
+    if (lower.slice(start, index) === 'import') return true
+  }
+
+  return false
+}
+
+function getURLFromFunction(argument: string): string | null {
+  const trimmed = argument.trim()
+  if (!trimmed) return ''
+
+  const first = trimmed[0]
+  const last = trimmed[trimmed.length - 1]
+  const unquoted = (first === '"' || first === "'") && last === first
+    ? trimmed.slice(1, -1).trim()
+    : trimmed
+
+  // Nested functions are not valid static URL candidates and can defer the
+  // security decision until after sanitization.
+  if (unquoted.includes('(') || unquoted.includes(')')) return null
+  return unquoted
+}
+
+function checkCSSValue(cssValue: string, strictMode: boolean): CSSCheckResult {
+  const canonical = canonicalizeCSS(cssValue)
+  if (!canonical.valid) {
+    return { dangerous: true, reason: 'Malformed CSS comment or escape sequence' }
+  }
+
+  for (const token of getCSSFunctions(canonical.value)) {
+    if (token.name === INVALID_FUNCTION_TOKEN) {
+      return { dangerous: true, reason: 'CSS function nesting or count exceeds the security limit' }
+    }
+
+    if (token.name === 'expression') {
+      return { dangerous: true, reason: 'Dangerous CSS function: expression()' }
+    }
+
+    if (token.name === 'url') {
+      if (strictMode) {
+        return { dangerous: true, reason: 'CSS url() is not allowed in strict mode' }
+      }
+
+      const url = getURLFromFunction(token.argument)
+      if (url === null || !isSafeURL(url, CSS_URL_PROTOCOLS)) {
+        return { dangerous: true, reason: 'Dangerous or malformed CSS URL' }
+      }
+    }
+
+    if (RESOURCE_FUNCTION_SET.has(token.name)) {
+      return { dangerous: true, reason: `CSS resource function not allowed: ${token.name}()` }
+    }
+
+    if (strictMode && STRICT_DYNAMIC_FUNCTION_SET.has(token.name)) {
+      return { dangerous: true, reason: `Dynamic CSS function not allowed in strict mode: ${token.name}()` }
     }
   }
 
   return { dangerous: false }
 }
 
-/**
- * Check if CSS value contains dangerous patterns
- *
- * Used for per-property validation.
- *
- * @param cssValue - CSS value to validate
- * @returns Validation result with details
- *
- * @example
- * hasDangerousValue('url(javascript:alert(1))')  // { dangerous: true }
- * hasDangerousValue('red')  // { dangerous: false }
- */
-export function hasDangerousValue(
-  cssValue: string
-): { dangerous: boolean; reason?: string; pattern?: RegExp } {
-  if (!cssValue || typeof cssValue !== 'string') {
-    return { dangerous: false }
+/** Check for constructs that invalidate the complete declaration list. */
+export function hasGloballyDangerousCSS(css: string): CSSCheckResult {
+  if (!css || typeof css !== 'string') return { dangerous: false }
+
+  const canonical = canonicalizeCSS(css)
+  if (!canonical.valid) {
+    return { dangerous: true, reason: 'Malformed CSS comment or escape sequence' }
   }
 
-  // Check against value dangerous patterns
-  for (const pattern of VALUE_DANGEROUS_PATTERNS) {
-    if (pattern.test(cssValue)) {
-      return {
-        dangerous: true,
-        reason: `Dangerous CSS value pattern detected: ${pattern.source}`,
-        pattern,
-      }
-    }
+  if (hasImportAtRule(canonical.value)) {
+    return { dangerous: true, reason: 'Dangerous CSS at-rule detected: @import' }
+  }
+
+  if (getCSSFunctions(canonical.value).some((token) => token.name === 'expression')) {
+    return { dangerous: true, reason: 'Dangerous CSS function detected: expression()' }
   }
 
   return { dangerous: false }
 }
 
-/**
- * Check if CSS contains dangerous patterns (legacy function)
- *
- * Checks both global and value patterns.
- *
- * @param css - CSS string to validate
- * @returns Validation result with details
- *
- * @example
- * hasDangerousCSS('color: red')  // { dangerous: false }
- * hasDangerousCSS('background: url(javascript:alert(1))')  // { dangerous: true }
- * hasDangerousCSS('width: expression(alert(1))')  // { dangerous: true }
- */
-export function hasDangerousCSS(
-  css: string
-): { dangerous: boolean; reason?: string; pattern?: RegExp } {
-  // Check globally dangerous patterns first
+/** Check a property value with the same tokenizer used by the sanitizer. */
+export function hasDangerousValue(cssValue: string): CSSCheckResult {
+  if (!cssValue || typeof cssValue !== 'string') return { dangerous: false }
+  return checkCSSValue(cssValue, false)
+}
+
+/** Check both list-wide and individual-value security rules. */
+export function hasDangerousCSS(css: string): CSSCheckResult {
   const globalCheck = hasGloballyDangerousCSS(css)
-  if (globalCheck.dangerous) {
-    return globalCheck
-  }
-
-  // Check value patterns
-  return hasDangerousValue(css)
+  return globalCheck.dangerous ? globalCheck : hasDangerousValue(css)
 }
 
 /**
@@ -294,7 +573,7 @@ export function isForbiddenCSSProperty(property: string): boolean {
   }
 
   const normalized = property.toLowerCase().trim()
-  return FORBIDDEN_CSS_PROPERTIES.includes(normalized)
+  return FORBIDDEN_CSS_PROPERTY_SET.has(normalized)
 }
 
 /**
@@ -314,7 +593,7 @@ export function isSafeCSSProperty(property: string): boolean {
   }
 
   const normalized = property.toLowerCase().trim()
-  return SAFE_CSS_PROPERTIES.includes(normalized)
+  return SAFE_CSS_PROPERTY_SET.has(normalized)
 }
 
 /**
@@ -342,52 +621,29 @@ export function sanitizeCSS(css: string, strictMode: boolean = false): string {
     return ''
   }
 
-  // In strict mode, validate each property
-  if (strictMode) {
-    // Parse CSS declarations (simple parser)
-    const declarations = css.split(';').map(d => d.trim()).filter(Boolean)
-    const safeDeclara = []
+  const declarations = splitCSSDeclarations(css)
+  if (!declarations) return ''
 
-    for (const declaration of declarations) {
-      const colonIndex = declaration.indexOf(':')
-      if (colonIndex === -1) continue
-
-      const property = declaration.slice(0, colonIndex).trim()
-      const value = declaration.slice(colonIndex + 1).trim()
-
-      // Check if property is safe
-      if (isSafeCSSProperty(property) && !isForbiddenCSSProperty(property)) {
-        // Check if value is safe
-        if (!hasDangerousValue(value).dangerous) {
-          safeDeclara.push(`${property}: ${value}`)
-        }
-      }
-    }
-
-    return safeDeclara.join('; ')
-  }
-
-  // Non-strict mode: just remove forbidden properties
-  const declarations = css.split(';').map(d => d.trim()).filter(Boolean)
-  const safeDeclara = []
+  const safeDeclarations: string[] = []
 
   for (const declaration of declarations) {
-    const colonIndex = declaration.indexOf(':')
-    if (colonIndex === -1) continue
+    const canonicalProperty = canonicalizeCSS(declaration.property)
+    if (!canonicalProperty.valid) continue
 
-    const property = declaration.slice(0, colonIndex).trim()
-    const value = declaration.slice(colonIndex + 1).trim()
+    let propertyName = canonicalProperty.value.toLowerCase().trim()
+    // Account for legacy CSS parser hacks such as _behavior and *behavior.
+    while (propertyName.startsWith('_') || propertyName.startsWith('*')) {
+      propertyName = propertyName.slice(1)
+    }
 
-    // Skip forbidden properties
-    if (isForbiddenCSSProperty(property)) continue
+    if (!propertyName || isForbiddenCSSProperty(propertyName)) continue
+    if (strictMode && !isSafeCSSProperty(propertyName)) continue
+    if (checkCSSValue(declaration.value, strictMode).dangerous) continue
 
-    // Skip if value has dangerous patterns
-    if (hasDangerousValue(value).dangerous) continue
-
-    safeDeclara.push(declaration)
+    safeDeclarations.push(`${declaration.property}: ${declaration.value}`)
   }
 
-  return safeDeclara.join('; ')
+  return safeDeclarations.join('; ')
 }
 
 /**

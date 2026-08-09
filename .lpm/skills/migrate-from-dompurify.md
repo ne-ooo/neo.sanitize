@@ -1,6 +1,6 @@
 ---
 name: migrate-from-dompurify
-description: Migration guide from DOMPurify and sanitize-html to neo.sanitize — same security model, preset schemas (basic/relaxed/strict), createSanitizer for reusable instances, built-in protocol/CSS/DOM-clobbering/mXSS validators, TypeScript native, tree-shakeable, zero dependencies, subpath imports
+description: Security-focused migration guide from DOMPurify and sanitize-html to neo.sanitize, including schemas, validators, TypeScript, hooks, and subpath imports
 version: "1.0.0"
 globs:
   - "**/*.ts"
@@ -15,7 +15,6 @@ globs:
 
 | | DOMPurify | sanitize-html | neo.sanitize |
 |---|-----------|---------------|--------------|
-| **Bundle** | ~15 KB | ~45 KB | ~8 KB |
 | **Dependencies** | Zero | 10+ | Zero |
 | **Tree-shaking** | No | No | Yes |
 | **TypeScript** | `@types/dompurify` | Built-in (partial) | Built-in |
@@ -71,6 +70,7 @@ sanitize(html, { returnString: false })
 // FORBID_TAGS → use allowedTags (whitelist approach)
 DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'form'] })
 // neo.sanitize uses whitelist, not blacklist — specify what's allowed
+// Active-content tags always stay blocked, even when allowedTags contains them
 
 // FORBID_ATTR → forbiddenAttributes
 DOMPurify.sanitize(html, { FORBID_ATTR: ['style', 'class'] })
@@ -91,6 +91,7 @@ DOMPurify.sanitize(html, { FORBID_TAGS: ['form', 'input'] })
 // neo.sanitize — you ALLOW specific tags (safer default)
 sanitize(html, { allowedTags: ['p', 'a', 'strong', 'em'] })
 // Unspecified tags are removed
+// Active-content tags cannot be enabled
 ```
 
 **2. Attribute control is per-tag:**

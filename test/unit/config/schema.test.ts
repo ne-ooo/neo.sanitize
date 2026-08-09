@@ -6,7 +6,11 @@ import {
   getSchema,
   mergeSchema,
 } from '../../../src/config/schemas.js'
-import { sanitize } from '../../../src/core/sanitizer.js'
+import { DEFAULT_OPTIONS } from '../../../src/config/defaults.js'
+import { createSanitizer, sanitize } from '../../../src/core/sanitizer.js'
+import { SAFE_CSS_PROPERTIES } from '../../../src/validators/css.js'
+import { DANGEROUS_IDS } from '../../../src/validators/dom-clobbering.js'
+import { DANGEROUS_TAGS } from '../../../src/validators/tags.js'
 
 describe('BASIC_SCHEMA', () => {
   it('allows text formatting tags', () => {
@@ -79,6 +83,19 @@ describe('RELAXED_SCHEMA', () => {
 
   it('does not allow style attribute (CSS injection risk)', () => {
     expect(RELAXED_SCHEMA.allowStyleAttribute).toBe(false)
+  })
+
+  it('does not allow all attributes on any tag', () => {
+    expect(RELAXED_SCHEMA.allowAllAttributes).toEqual([])
+  })
+
+  it('removes id and name from code and pre elements', () => {
+    const result = sanitize(
+      '<code id="applicationConfig" name="redirectTo">code</code><pre id="runtimeConfig">pre</pre>',
+      RELAXED_SCHEMA
+    )
+
+    expect(result).toBe('<code>code</code><pre>pre</pre>')
   })
 
   it('allows more protocols than BASIC_SCHEMA', () => {
@@ -193,6 +210,68 @@ describe('mergeSchema', () => {
     const before = [...BASIC_SCHEMA.allowedTags]
     mergeSchema('BASIC', { allowedTags: ['p', 'div', 'img'] })
     expect(BASIC_SCHEMA.allowedTags).toEqual(before)
+  })
+
+  it('does not share nested collections with the schema', () => {
+    const merged = mergeSchema('BASIC', {})
+
+    expect(merged.allowedTags).not.toBe(BASIC_SCHEMA.allowedTags)
+    expect(merged.allowedAttributes).not.toBe(BASIC_SCHEMA.allowedAttributes)
+    expect(merged.allowedAttributes.a).not.toBe(BASIC_SCHEMA.allowedAttributes.a)
+  })
+})
+
+describe('configuration immutability', () => {
+  it('deep-freezes the default configuration and predefined schemas', () => {
+    expect(Object.isFrozen(DEFAULT_OPTIONS)).toBe(true)
+    expect(Object.isFrozen(DEFAULT_OPTIONS.allowedTags)).toBe(true)
+    expect(Object.isFrozen(DEFAULT_OPTIONS.allowedAttributes)).toBe(true)
+    expect(Object.isFrozen(DEFAULT_OPTIONS.allowedAttributes.a)).toBe(true)
+    expect(Object.isFrozen(BASIC_SCHEMA)).toBe(true)
+    expect(Object.isFrozen(BASIC_SCHEMA.allowedTags)).toBe(true)
+    expect(Object.isFrozen(RELAXED_SCHEMA.allowedAttributes.a)).toBe(true)
+    expect(Object.isFrozen(DANGEROUS_TAGS)).toBe(true)
+    expect(Object.isFrozen(DANGEROUS_IDS)).toBe(true)
+    expect(Object.isFrozen(SAFE_CSS_PROPERTIES)).toBe(true)
+  })
+
+  it('returns detached and frozen sanitizer configuration snapshots', () => {
+    const sanitizer = createSanitizer({ allowedTags: ['p'] })
+    const first = sanitizer.getConfig()
+    const second = sanitizer.getConfig()
+
+    expect(first).not.toBe(second)
+    expect(first.allowedTags).not.toBe(second.allowedTags)
+    expect(Object.isFrozen(first)).toBe(true)
+    expect(Object.isFrozen(first.allowedTags)).toBe(true)
+    expect(() => (first.allowedTags as string[]).push('img')).toThrow()
+    expect(sanitizer.sanitize('<p>Keep</p><img src="x">')).toBe('<p>Keep</p>')
+  })
+
+  it('does not retain caller-owned configuration arrays', () => {
+    const allowedTags = ['p']
+    const allowedAttributes = { p: ['title'] }
+    const sanitizer = createSanitizer({ allowedTags, allowedAttributes })
+
+    allowedTags.push('img')
+    allowedAttributes.p.push('onclick')
+
+    expect(sanitizer.sanitize('<p onclick="alert(1)">Safe</p><img src="x">')).toBe(
+      '<p>Safe</p>'
+    )
+  })
+
+  it('updates internal configuration without mutating old snapshots', () => {
+    const sanitizer = createSanitizer({ allowedTags: ['p'] })
+    const before = sanitizer.getConfig()
+
+    sanitizer.updateConfig({ allowedTags: ['p', 'img'] })
+
+    expect(before.allowedTags).toEqual(['p'])
+    expect(sanitizer.getConfig().allowedTags).toEqual(['p', 'img'])
+    expect(sanitizer.sanitize('<img src="https://example.com/x.png">')).toBe(
+      '<img src="https://example.com/x.png">'
+    )
   })
 })
 

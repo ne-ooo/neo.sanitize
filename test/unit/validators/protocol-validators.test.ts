@@ -6,6 +6,7 @@ import {
   validateProtocol,
   sanitizeURL,
   isSafeURL,
+  isSafeURLAttributeValue,
 } from '../../../src/validators/protocols.js'
 import { ALLOWED_PROTOCOLS, DANGEROUS_PROTOCOLS } from '../../../src/utils/constants.js'
 
@@ -251,5 +252,22 @@ describe('isSafeURL', () => {
 
   it('returns false for about: URL', () => {
     expect(isSafeURL('about:blank')).toBe(false)
+  })
+})
+
+describe('isSafeURLAttributeValue', () => {
+  it('checks every srcset candidate', () => {
+    expect(isSafeURLAttributeValue('srcset', '/small.png 1x, https://safe.test/large.png 2x')).toBe(true)
+    expect(isSafeURLAttributeValue('srcset', 'https://safe.test/a.png 1x, javascript:alert(1) 2x')).toBe(false)
+  })
+
+  it('checks every whitespace-separated URL', () => {
+    expect(isSafeURLAttributeValue('attributionsrc', 'https://a.test/register /relative')).toBe(true)
+    expect(isSafeURLAttributeValue('ping', 'https://a.test/ping javascript:alert(1)')).toBe(false)
+  })
+
+  it('uses single-URL validation for ordinary URL attributes', () => {
+    expect(isSafeURLAttributeValue('href', 'https://safe.test')).toBe(true)
+    expect(isSafeURLAttributeValue('href', 'javascript:alert(1)')).toBe(false)
   })
 })

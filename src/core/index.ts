@@ -5,4 +5,5 @@
  */
 
 export { sanitize, createSanitizer, sanitizeBasic, sanitizeRelaxed, sanitizeStrict } from './sanitizer.js'
-export { parseHTML, serializeHTML, isBrowser, isNode } from './parser.js'
+export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from './parser.js'
+export type { DOMParserLike, DOMRuntime } from '../types.js'

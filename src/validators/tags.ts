@@ -13,6 +13,7 @@
 
 import type { TagValidationResult } from '../types.js'
 import { DEFAULT_ALLOWED_TAGS } from '../utils/constants.js'
+import { deepFreeze } from '../utils/object.js'
 
 /**
  * Dangerous HTML tags that should never be allowed
@@ -26,7 +27,7 @@ import { DEFAULT_ALLOWED_TAGS } from '../utils/constants.js'
  * - base: Can redirect all relative URLs
  * - meta: Can redirect via refresh
  */
-export const DANGEROUS_TAGS: readonly string[] = [
+export const DANGEROUS_TAGS: readonly string[] = deepFreeze([
   'script',
   'iframe',
   'object',
@@ -48,7 +49,16 @@ export const DANGEROUS_TAGS: readonly string[] = [
   'frameset',
   'frame',
   'noframes',
-] as const
+])
+
+const DANGEROUS_TAG_SET = new Set(DANGEROUS_TAGS)
+
+/**
+ * Check an already-normalized tag name against the invariant blocklist.
+ */
+export function isDangerousTagNormalized(tagName: string): boolean {
+  return DANGEROUS_TAG_SET.has(tagName)
+}
 
 /**
  * Normalize tag name to lowercase
@@ -84,6 +94,14 @@ export function isTagAllowed(
   allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS
 ): boolean {
   const normalized = normalizeTagName(tagName)
+
+  // Active-content tags are a security invariant, not a configurable
+  // allowlist choice. Keeping this check here protects every caller of the
+  // tag validator, including the core sanitizer and custom schemas.
+  if (isDangerousTag(normalized)) {
+    return false
+  }
+
   return allowedTags.includes(normalized)
 }
 
@@ -100,7 +118,7 @@ export function isTagAllowed(
  */
 export function isDangerousTag(tagName: string): boolean {
   const normalized = normalizeTagName(tagName)
-  return DANGEROUS_TAGS.includes(normalized)
+  return isDangerousTagNormalized(normalized)
 }
 
 /**
@@ -131,6 +149,14 @@ export function validateTag(
 ): TagValidationResult {
   const normalized = normalizeTagName(tagName)
 
+  if (isDangerousTag(normalized)) {
+    return {
+      allowed: false,
+      tagName: normalized,
+      reason: `Dangerous tag: ${normalized}`,
+    }
+  }
+
   // Check if tag is in allowed list
   const allowed = allowedTags.includes(normalized)
 
@@ -138,9 +164,7 @@ export function validateTag(
     return {
       allowed: false,
       tagName: normalized,
-      reason: isDangerousTag(normalized)
-        ? `Dangerous tag: ${normalized}`
-        : `Tag not allowed: ${normalized}`,
+      reason: `Tag not allowed: ${normalized}`,
     }
   }
 
@@ -172,7 +196,7 @@ export function filterAllowedTags(
 ): string[] {
   return tagNames
     .map(normalizeTagName)
-    .filter((tagName) => allowedTags.includes(tagName))
+    .filter((tagName) => isTagAllowed(tagName, allowedTags))
 }
 
 /**
@@ -188,5 +212,5 @@ export function filterAllowedTags(
  * // ['script', 'iframe']
  */
 export function getDangerousTags(tagNames: string[]): string[] {
-  return tagNames.map(normalizeTagName).filter((tagName) => DANGEROUS_TAGS.includes(tagName))
+  return tagNames.map(normalizeTagName).filter((tagName) => DANGEROUS_TAG_SET.has(tagName))
 }

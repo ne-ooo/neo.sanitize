@@ -9,6 +9,8 @@
 
 import type { SanitizeOptions } from '../types.js'
 import { DEFAULT_OPTIONS } from './defaults.js'
+import { mergeOptions } from './options.js'
+import { deepFreeze } from '../utils/object.js'
 
 /**
  * BASIC schema - Minimal HTML (text formatting only)
@@ -27,7 +29,7 @@ import { DEFAULT_OPTIONS } from './defaults.js'
  * Security level: HIGH
  * Usability: LOW (very limited HTML)
  */
-export const BASIC_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
+export const BASIC_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
   ...DEFAULT_OPTIONS,
 
   // Minimal tags (text formatting only)
@@ -72,7 +74,7 @@ export const BASIC_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
 
   // No style attribute
   allowStyleAttribute: false,
-}
+})
 
 /**
  * RELAXED schema - Rich HTML (images, links, tables, formatting)
@@ -95,7 +97,7 @@ export const BASIC_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
  * Security level: MEDIUM
  * Usability: HIGH (rich HTML editing)
  */
-export const RELAXED_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
+export const RELAXED_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
   ...DEFAULT_OPTIONS,
 
   // All default tags (including images, tables, headings)
@@ -119,9 +121,10 @@ export const RELAXED_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
   // Still no style (CSS injection risk)
   allowStyleAttribute: false,
 
-  // Allow all attributes on code/pre for syntax highlighting
-  allowAllAttributes: ['code', 'pre'],
-}
+  // class is already allowed explicitly on code/pre by the default attribute
+  // policy. Do not admit id/name through a broad attribute bypass.
+  allowAllAttributes: [],
+})
 
 /**
  * STRICT schema - Paranoid security (text only, no HTML)
@@ -139,7 +142,7 @@ export const RELAXED_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
  * Security level: MAXIMUM
  * Usability: NONE (all HTML stripped)
  */
-export const STRICT_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
+export const STRICT_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
   ...DEFAULT_OPTIONS,
 
   // No tags allowed (strip all HTML)
@@ -161,7 +164,7 @@ export const STRICT_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = {
   allowClassAttribute: false,
   allowIdAttribute: false,
   allowStyleAttribute: false,
-}
+})
 
 /**
  * Get schema by name
@@ -206,14 +209,5 @@ export function mergeSchema(
 ): Required<Omit<SanitizeOptions, 'hooks'>> {
   const schema = getSchema(schemaName)
 
-  return {
-    ...schema,
-    ...customOptions,
-    // Merge arrays
-    allowedTags: customOptions.allowedTags ?? schema.allowedTags,
-    allowedAttributes: customOptions.allowedAttributes ?? schema.allowedAttributes,
-    allowedProtocols: customOptions.allowedProtocols ?? schema.allowedProtocols,
-    forbiddenAttributes: customOptions.forbiddenAttributes ?? schema.forbiddenAttributes,
-    allowAllAttributes: customOptions.allowAllAttributes ?? schema.allowAllAttributes,
-  }
+  return mergeOptions(schema, customOptions)
 }

@@ -1,24 +1,30 @@
 /**
  * @lpm.dev/neo.sanitize - HTML Parser
  *
- * Universal HTML parser supporting both browser and Node.js:
- * - Browser: Uses native DOMParser (fast, mXSS-resistant)
- * - Node.js: Uses jsdom for now (Phase 2b complete, integration pending)
+ * Browsers use their document runtime. Node.js and Web Workers must supply a
+ * DOM runtime when they do not expose `document` and `DOMParser` globally.
  */
 
+import type { DOMParserLike, DOMRuntime } from '../types.js'
+
+const PARSER_CACHE = new WeakMap<DOMRuntime['DOMParser'], DOMParserLike>()
+let cachedGlobalDocument: Document | undefined
+let cachedGlobalParser: DOMRuntime['DOMParser'] | undefined
+let cachedGlobalRuntime: DOMRuntime | undefined
+
 /**
- * Check if we're in a browser environment
- *
- * @returns True if browser APIs are available
+ * Check if the current environment has browser DOM APIs.
  */
 export function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof document !== 'undefined' && typeof DOMParser !== 'undefined'
+  return (
+    typeof window !== 'undefined' &&
+    typeof document !== 'undefined' &&
+    typeof DOMParser !== 'undefined'
+  )
 }
 
 /**
- * Check if we're in a Node.js environment
- *
- * @returns True if running in Node.js
+ * Check if the current environment is Node.js.
  */
 export function isNode(): boolean {
   return (
@@ -29,89 +35,119 @@ export function isNode(): boolean {
 }
 
 /**
- * Parse HTML string to DocumentFragment
- *
- * Universal parser that works in both environments:
- * - Browser: Uses native DOMParser (highly performant, mXSS-resistant)
- * - Node.js: Uses jsdom (full HTML5 compliance)
- *
- * Future: Will use @lpm.dev/neo.dom for Node.js (lighter, faster)
- *
- * @param html - HTML string to parse
- * @returns DocumentFragment containing parsed DOM tree
- *
- * @example
- * const fragment = parseHTML('<p>Hello <strong>world</strong></p>')
- * // DocumentFragment { childNodes: [<p>] }
+ * Resolve an explicit runtime or the DOM APIs from the current browser.
  */
-export function parseHTML(html: string): DocumentFragment {
-  // Browser environment - use native DOMParser
-  if (isBrowser()) {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(html, 'text/html')
-
-    const fragment = document.createDocumentFragment()
-
-    // Move all nodes from body to fragment
-    while (doc.body.firstChild) {
-      fragment.appendChild(doc.body.firstChild)
+export function resolveDOMRuntime(runtime?: DOMRuntime): DOMRuntime {
+  if (runtime) {
+    if (
+      !runtime.document ||
+      typeof runtime.document.createDocumentFragment !== 'function' ||
+      typeof runtime.document.createElement !== 'function' ||
+      typeof runtime.DOMParser !== 'function'
+    ) {
+      throw new TypeError(
+        '@lpm.dev/neo.sanitize: The DOM runtime is not compatible. ' +
+          'Pass an object with document and DOMParser from the same DOM implementation.'
+      )
     }
 
-    return fragment
+    return runtime
   }
 
-  // Node.js environment - use jsdom (existing implementation)
-  // NOTE: jsdom is a dev dependency, used for testing
-  // Future: Replace with @lpm.dev/neo.dom for production use
-  if (typeof DOMParser === 'undefined') {
-    throw new Error(
-      '@lpm.dev/neo.sanitize: DOMParser not available. ' +
-        'Browser environment required or use jsdom in Node.js for testing.'
-    )
+  if (typeof document !== 'undefined' && typeof DOMParser !== 'undefined') {
+    if (
+      cachedGlobalRuntime &&
+      cachedGlobalDocument === document &&
+      cachedGlobalParser === DOMParser
+    ) {
+      return cachedGlobalRuntime
+    }
+
+    cachedGlobalDocument = document
+    cachedGlobalParser = DOMParser
+    cachedGlobalRuntime = { document, DOMParser }
+    return cachedGlobalRuntime
   }
 
-  // Fallback to global DOMParser (provided by test environment)
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(html, 'text/html')
+  const environment = isNode() ? 'Node.js' : 'this environment'
+  throw new Error(
+    `@lpm.dev/neo.sanitize: No DOM runtime is available in ${environment}. ` +
+      'Pass { document, DOMParser } as the runtime argument. Web Workers must supply a compatible DOM implementation.'
+  )
+}
 
-  const fragment = (typeof document !== 'undefined' ? document : (doc as any).defaultView.document).createDocumentFragment()
+/**
+ * Parse an HTML string into a document fragment.
+ *
+ * @param html - HTML string to parse
+ * @param runtime - Optional DOM runtime for Node.js or a Web Worker
+ */
+export function parseHTML(html: string, runtime?: DOMRuntime): DocumentFragment {
+  const dom = resolveDOMRuntime(runtime)
+  return parseHTMLWithRuntime(html, dom)
+}
 
-  while (doc.body.firstChild) {
-    fragment.appendChild(doc.body.firstChild)
+/**
+ * Parse HTML with a previously resolved runtime.
+ */
+export function parseHTMLWithRuntime(html: string, dom: DOMRuntime): DocumentFragment {
+  const parsedDocument = parseDocumentWithRuntime(html, dom)
+  const fragment = dom.document.createDocumentFragment()
+
+  while (parsedDocument.body.firstChild) {
+    fragment.appendChild(parsedDocument.body.firstChild)
   }
 
   return fragment
 }
 
 /**
- * Serialize DocumentFragment to HTML string
- *
- * Converts DOM tree back to HTML string.
- *
- * @param fragment - DocumentFragment to serialize
- * @returns HTML string
- *
- * @example
- * const fragment = document.createDocumentFragment()
- * const p = document.createElement('p')
- * p.textContent = 'Hello world'
- * fragment.appendChild(p)
- *
- * const html = serializeHTML(fragment)
- * // '<p>Hello world</p>'
+ * Parse HTML into a document with a previously resolved runtime.
  */
-export function serializeHTML(fragment: DocumentFragment): string {
-  // Get document reference (browser or jsdom)
-  const doc = typeof document !== 'undefined' ? document : (fragment as any).ownerDocument
-
-  if (!doc) {
-    throw new Error('Cannot serialize: document not available')
+export function parseDocumentWithRuntime(html: string, dom: DOMRuntime): Document {
+  let parser = PARSER_CACHE.get(dom.DOMParser)
+  if (!parser) {
+    parser = new dom.DOMParser()
+    PARSER_CACHE.set(dom.DOMParser, parser)
   }
 
-  // Create temporary div to hold fragment
-  const div = doc.createElement('div')
-  div.appendChild(fragment.cloneNode(true))
+  const parsedDocument = parser.parseFromString(html, 'text/html')
 
-  // Return innerHTML
-  return div.innerHTML
+  if (!parsedDocument?.body) {
+    throw new TypeError(
+      '@lpm.dev/neo.sanitize: The DOM runtime parser did not return an HTML document with a body.'
+    )
+  }
+
+  return parsedDocument
+}
+
+/**
+ * Serialize a document fragment to an HTML string.
+ */
+export function serializeHTML(fragment: DocumentFragment): string {
+  const ownerDocument = fragment.ownerDocument
+
+  if (!ownerDocument) {
+    throw new Error('@lpm.dev/neo.sanitize: Cannot serialize a fragment without an owner document.')
+  }
+
+  const container = ownerDocument.createElement('div')
+  container.appendChild(fragment.cloneNode(true))
+  return container.innerHTML
+}
+
+/**
+ * Serialize a final result without cloning a fragment that will be discarded.
+ */
+export function consumeAndSerializeHTML(fragment: DocumentFragment): string {
+  const ownerDocument = fragment.ownerDocument
+
+  if (!ownerDocument) {
+    throw new Error('@lpm.dev/neo.sanitize: Cannot serialize a fragment without an owner document.')
+  }
+
+  const container = ownerDocument.createElement('div')
+  container.appendChild(fragment)
+  return container.innerHTML
 }

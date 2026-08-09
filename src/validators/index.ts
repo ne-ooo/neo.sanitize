@@ -11,6 +11,7 @@ export {
   validateProtocol,
   sanitizeURL,
   isSafeURL,
+  isSafeURLAttributeValue,
 } from './protocols.js'
 
 export {
