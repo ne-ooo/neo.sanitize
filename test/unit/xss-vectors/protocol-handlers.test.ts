@@ -190,6 +190,24 @@ describe('Protocol Handler XSS Vectors', () => {
   })
 
   describe('Protocol in other URL attributes', () => {
+    it('rejects srcset when any candidate has a dangerous protocol', () => {
+      const html = '<img srcset="https://safe.test/a.png 1x, javascript:alert(1) 2x">'
+      const result = sanitize(html, { allowedAttributes: { img: ['srcset'] } })
+      expect(result).toBe('<img>')
+    })
+
+    it('allows srcset when every candidate is safe', () => {
+      const html = '<img srcset="/small.png 1x, https://safe.test/large.png 2x">'
+      const result = sanitize(html, { allowedAttributes: { img: ['srcset'] } })
+      expect(result).toBe(html)
+    })
+
+    it('rejects imagesrcset when a later candidate uses data:', () => {
+      const html = '<img imagesrcset="https://safe.test/a.png 1x, data:image/svg+xml,x 2x">'
+      const result = sanitize(html, { allowedAttributes: { img: ['imagesrcset'] } })
+      expect(result).toBe('<img>')
+    })
+
     it('should remove javascript: from img src', () => {
       const html = '<img src="javascript:alert(1)">'
       const result = sanitize(html)

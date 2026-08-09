@@ -1,6 +1,6 @@
 ---
 name: anti-patterns
-description: Common mistakes when using neo.sanitize — allowStyleAttribute enables CSS injection without strictCSSValidation, allowIdAttribute enables DOM clobbering without preventDOMClobbering, dangerous tags never keep text content, data attributes disabled by default for privacy, allowAllAttributes bypasses all security, whitespace in URLs is trimmed (XSS vector), class attribute disabled by default, returnString false returns DocumentFragment not string
+description: Common neo.sanitize mistakes involving DOM runtimes, CSS URLs, DOM clobbering, dangerous tags, broad attributes, and DocumentFragment output
 version: "1.0.0"
 globs:
   - "**/*.ts"
@@ -11,58 +11,79 @@ globs:
 
 # Anti-Patterns for @lpm.dev/neo.sanitize
 
-### [CRITICAL] Enabling `allowStyleAttribute` without `strictCSSValidation` opens CSS injection
+### [HIGH] Supply a DOM runtime outside a browser document
 
 Wrong:
 
 ```typescript
-// AI enables style attribute without CSS validation
-sanitize('<div style="background: url(javascript:alert(1))">Hello</div>', {
-  allowStyleAttribute: true,
-})
-// CSS injection possible! expression(), @import, url(javascript:) allowed
+// Node.js does not provide document or DOMParser.
+sanitize(userHtml)
 ```
 
 Correct:
 
 ```typescript
-// Always pair allowStyleAttribute with strictCSSValidation
+import { JSDOM } from 'jsdom'
+
+const dom = new JSDOM('')
+const runtime = {
+  document: dom.window.document,
+  DOMParser: dom.window.DOMParser,
+}
+
+sanitize(userHtml, {}, runtime)
+```
+
+Web Workers must also supply a compatible runtime. Use `document` and `DOMParser` from the same DOM implementation.
+
+Source: `src/core/parser.ts`
+
+### [HIGH] Use strict CSS validation for untrusted styles
+
+Wrong:
+
+```typescript
+// Non-strict mode permits remote HTTP and HTTPS CSS URLs.
+sanitize('<div style="background: url(https://tracker.test/pixel)">Hello</div>', {
+  allowStyleAttribute: true,
+})
+// The remote URL remains.
+```
+
+Correct:
+
+```typescript
+// Use strict mode for untrusted styles.
 sanitize('<div style="color: red; font-size: 14px">Hello</div>', {
   allowStyleAttribute: true,
   strictCSSValidation: true,
 })
-// Safe: only 70+ whitelisted CSS properties allowed
-// Blocks: expression(), @import, url(javascript:), url(data:), -moz-binding
+// Strict mode allows listed properties only.
+// Strict mode removes URL and dynamic functions.
 
-// If you don't need inline styles, leave allowStyleAttribute: false (default)
+// If inline styles are not necessary, keep allowStyleAttribute false.
 ```
 
-Without `strictCSSValidation`, the style attribute accepts any CSS including `expression()` (IE), `@import url(evil.css)`, and `url(javascript:...)`. Always enable both together.
+Both modes remove `expression()`, `@import`, dangerous URL protocols, and forbidden properties. Non-strict mode permits safe remote URLs and other properties.
 
-Source: `src/validators/css.ts` — CSS validation only runs when strictCSSValidation is true
+Source: `src/validators/css.ts`
 
-### [CRITICAL] `allowAllAttributes` on user-controlled tags bypasses ALL security
+### [HIGH] Do not use `allowAllAttributes` for untrusted content
 
 Wrong:
 
 ```typescript
-// AI allows all attributes on common tags
+// A broad policy permits id, name, and unknown attributes.
 sanitize(userHtml, {
   allowAllAttributes: ['div', 'span', 'p'],
 })
-// Event handlers like onclick, onmouseover now allowed on these tags!
-// <div onclick="alert(1)"> passes through
+// <div id="applicationConfig"> can create a named window property.
 ```
 
 Correct:
 
 ```typescript
-// allowAllAttributes is for trusted tags like code/pre (syntax highlighting)
-sanitize(html, {
-  allowAllAttributes: ['code', 'pre'],  // Only for syntax highlighting classes
-})
-
-// For user content, explicitly whitelist needed attributes:
+// List the required attributes for each tag.
 sanitize(userHtml, {
   allowedAttributes: {
     div: ['class'],
@@ -73,9 +94,9 @@ sanitize(userHtml, {
 })
 ```
 
-`allowAllAttributes` skips ALL attribute validation for listed tags — including event handlers. Only use it for tags where you trust the content source (e.g., server-rendered code blocks).
+The sanitizer still removes event handlers, forbidden attributes, dangerous URLs, and dangerous styles. The broad policy permits other attributes.
 
-Source: `src/core/sanitizer.ts` — skips attribute filtering for allowAllAttributes tags
+Source: `src/validators/attributes.ts`
 
 ### [HIGH] Enabling `allowIdAttribute` without `preventDOMClobbering` is unsafe
 
@@ -145,6 +166,29 @@ const text = div.textContent
 Script and style tag contents are executable/interpretable — preserving their text would be a security risk. This behavior is intentional and cannot be overridden.
 
 Source: `src/core/sanitizer.ts` — dangerous tags skip keepTextContent
+
+### [HIGH] Treat `detectMXSS` as experimental
+
+Wrong:
+
+```typescript
+// This mode removes all foreign namespaces.
+sanitize(userSvg, {
+  allowedTags: ['svg', 'circle'],
+  detectMXSS: true,
+})
+```
+
+Correct:
+
+```typescript
+// Use HTML content only with the experimental mode.
+sanitize(userHtml, { detectMXSS: true })
+```
+
+The mode removes SVG, MathML, and other foreign namespaces. If three parse passes do not become stable, it returns empty output.
+
+Source: `src/core/sanitizer.ts` and `src/validators/mxss.ts`
 
 ### [HIGH] `data-*` attributes are disabled by default — not a bug
 

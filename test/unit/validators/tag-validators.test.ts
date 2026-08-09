@@ -63,7 +63,13 @@ describe('isTagAllowed', () => {
   it('uses custom allowedTags list', () => {
     expect(isTagAllowed('p', ['p', 'span'])).toBe(true)
     expect(isTagAllowed('div', ['p', 'span'])).toBe(false)
-    expect(isTagAllowed('script', ['p', 'script'])).toBe(true)
+    expect(isTagAllowed('script', ['p', 'script'])).toBe(false)
+  })
+
+  it('never permits dangerous tags from a custom allowlist', () => {
+    for (const tag of DANGEROUS_TAGS) {
+      expect(isTagAllowed(tag, [tag]), `${tag} must remain forbidden`).toBe(false)
+    }
   })
 
   it('returns false for unknown tags', () => {
@@ -144,6 +150,12 @@ describe('validateTag', () => {
     const result = validateTag('DIV', ['div', 'span'])
     expect(result.allowed).toBe(true)
     expect(result.tagName).toBe('div')
+  })
+
+  it('rejects a dangerous tag even when the custom list contains it', () => {
+    const result = validateTag('script', ['script'])
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toMatch(/dangerous/i)
   })
 
   it('marks tag not in custom allowed list as not allowed', () => {

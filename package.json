@@ -35,17 +35,21 @@
     ".lpm",
     "README.md",
     "CHANGELOG.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:package": "node scripts/verify-package.mjs",
     "test:watch": "vitest",
     "bench": "vitest bench",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build && npm run test"
+    "release:check": "lpm run typecheck && lpm run test:coverage && lpm run build && lpm run test:package",
+    "prepublishOnly": "lpm run release:check"
   },
   "keywords": [
     "lpm",
@@ -74,13 +78,20 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "lpm": {
+    "overrides": {
+      "esbuild": "^0.28.1"
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^3.2.6",
     "dompurify": "^3.0.9",
     "jsdom": "^24.0.0",
     "sanitize-html": "^2.12.1",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6",
+    "vite": "^6.4.3"
   }
 }

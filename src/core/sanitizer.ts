@@ -1,297 +1,404 @@
 /**
  * @lpm.dev/neo.sanitize - Core Sanitization Engine
- *
- * Main sanitization logic that:
- * 1. Parses HTML to DOM tree
- * 2. Traverses and validates each node
- * 3. Removes dangerous tags, attributes, and protocols
- * 4. Returns sanitized HTML string or DocumentFragment
  */
 
-import type { SanitizeOptions, SanitizeHooks } from '../types.js'
+import type {
+  DOMRuntime,
+  SanitizeHooks,
+  SanitizeOptions,
+  Sanitizer,
+} from '../types.js'
 import { DEFAULT_OPTIONS } from '../config/defaults.js'
+import { mergeOptions, snapshotOptions } from '../config/options.js'
+import type { ResolvedSanitizeOptions } from '../config/options.js'
 import { BASIC_SCHEMA, RELAXED_SCHEMA, STRICT_SCHEMA } from '../config/schemas.js'
-import { parseHTML, serializeHTML } from './parser.js'
-import { isTagAllowed, normalizeTagName, isDangerousTag } from '../validators/tags.js'
-import { validateAttribute, normalizeAttributeName } from '../validators/attributes.js'
+import {
+  consumeAndSerializeHTML,
+  parseDocumentWithRuntime,
+  parseHTMLWithRuntime,
+  resolveDOMRuntime,
+  serializeHTML,
+} from './parser.js'
+import { isDangerousTagNormalized } from '../validators/tags.js'
+import { validateAttributeNormalized } from '../validators/attributes.js'
+import type { AttributeValidationPolicy } from '../validators/attributes.js'
 import { sanitizeMXSS } from '../validators/mxss.js'
 
+const ELEMENT_NODE = 1
+const TEXT_NODE = 3
+const COMMENT_NODE = 8
+const DOCUMENT_FRAGMENT_NODE = 11
+const MAX_MXSS_STABILIZATION_PASSES = 3
+const EMPTY_OPTIONS: Partial<SanitizeOptions> = Object.freeze({})
+
+interface SanitizationPolicy {
+  config: ResolvedSanitizeOptions
+  allowedTags: ReadonlySet<string>
+  attributes: AttributeValidationPolicy
+}
+
+const POLICY_CACHE = new WeakMap<ResolvedSanitizeOptions, SanitizationPolicy>()
+
+function getPolicy(config: ResolvedSanitizeOptions): SanitizationPolicy {
+  const cached = POLICY_CACHE.get(config)
+  if (cached) return cached
+
+  const allowedAttributes = new Map<string, ReadonlySet<string>>()
+  for (const [tagName, attributes] of Object.entries(config.allowedAttributes)) {
+    allowedAttributes.set(tagName, new Set(attributes))
+  }
+
+  const policy: SanitizationPolicy = {
+    config,
+    allowedTags: new Set(config.allowedTags),
+    attributes: {
+      forbiddenAttributes: new Set(config.forbiddenAttributes),
+      allowAllAttributes: new Set(config.allowAllAttributes),
+      allowedAttributes,
+      allowedProtocols: new Set(config.allowedProtocols),
+    },
+  }
+  POLICY_CACHE.set(config, policy)
+  return policy
+}
+
+function resolveOptions(options: Partial<SanitizeOptions>): ResolvedSanitizeOptions {
+  if (
+    options === EMPTY_OPTIONS ||
+    options === DEFAULT_OPTIONS ||
+    options === BASIC_SCHEMA ||
+    options === RELAXED_SCHEMA ||
+    options === STRICT_SCHEMA
+  ) {
+    return options === EMPTY_OPTIONS
+      ? DEFAULT_OPTIONS
+      : (options as ResolvedSanitizeOptions)
+  }
+
+  const prototype = Object.getPrototypeOf(options)
+  if (prototype === Object.prototype || prototype === null) {
+    let hasOwnOption = false
+    for (const key in options) {
+      if (Object.prototype.hasOwnProperty.call(options, key)) {
+        hasOwnOption = true
+        break
+      }
+    }
+    if (!hasOwnOption) return DEFAULT_OPTIONS
+  }
+
+  return mergeOptions(DEFAULT_OPTIONS, options)
+}
+
 /**
- * Sanitize HTML string
- *
- * Main sanitization function that removes dangerous HTML:
- * - Blocks XSS vectors (script tags, event handlers, javascript: URLs)
- * - Whitelists safe tags and attributes
- * - Validates URL protocols
- * - Returns safe HTML
+ * Sanitize an HTML string.
  *
  * @param html - HTML string to sanitize
  * @param options - Sanitization options
- * @returns Sanitized HTML string or DocumentFragment
- *
- * @example
- * sanitize('<p>Hello</p>') // '<p>Hello</p>'
- * sanitize('<p onclick="alert(1)">Hello</p>') // '<p>Hello</p>'
- * sanitize('<script>alert(1)</script>') // ''
- * sanitize('<a href="javascript:alert(1)">Click</a>') // '<a>Click</a>'
+ * @param runtime - Optional DOM runtime for Node.js or a Web Worker
  */
 export function sanitize(
   html: string,
-  options: Partial<SanitizeOptions> = {}
+  options: Partial<SanitizeOptions> = EMPTY_OPTIONS,
+  runtime?: DOMRuntime
 ): string | DocumentFragment {
-  // Merge with default options (excluding hooks which are handled separately)
-  const config: Required<Omit<SanitizeOptions, 'hooks'>> = {
-    ...DEFAULT_OPTIONS,
-    ...options,
-    // Ensure arrays are provided
-    allowedTags: options.allowedTags ?? DEFAULT_OPTIONS.allowedTags,
-    allowedAttributes: options.allowedAttributes ?? DEFAULT_OPTIONS.allowedAttributes,
-    allowedProtocols: options.allowedProtocols ?? DEFAULT_OPTIONS.allowedProtocols,
-    forbiddenAttributes: options.forbiddenAttributes ?? DEFAULT_OPTIONS.forbiddenAttributes,
-    allowAllAttributes: options.allowAllAttributes ?? DEFAULT_OPTIONS.allowAllAttributes,
-  }
+  const config = resolveOptions(options)
+  return sanitizeWithPolicy(html, getPolicy(config), options.hooks, runtime)
+}
 
-  // Early return for empty input
+function sanitizeWithPolicy(
+  html: string,
+  policy: SanitizationPolicy,
+  hooks: SanitizeHooks | undefined,
+  runtime: DOMRuntime | undefined
+): string | DocumentFragment {
+  const config = policy.config
+
   if (!html || typeof html !== 'string') {
-    return config.returnString ? '' : document.createDocumentFragment()
+    if (config.returnString) {
+      return ''
+    }
+
+    return resolveDOMRuntime(runtime).document.createDocumentFragment()
   }
 
-  // Call beforeSanitize hook (Phase 2)
   let processedHtml = html
-  if (options.hooks?.beforeSanitize) {
-    const hookResult = options.hooks.beforeSanitize(html)
+  if (hooks?.beforeSanitize) {
+    const hookResult = hooks.beforeSanitize(html)
     if (typeof hookResult === 'string') {
       processedHtml = hookResult
     }
   }
 
-  // Parse HTML to DOM
-  const fragment = parseHTML(processedHtml)
+  const dom = resolveDOMRuntime(runtime)
+  const useDirectStringPath =
+    config.returnString &&
+    !config.detectMXSS &&
+    !hooks?.onElement &&
+    !hooks?.onAttribute &&
+    !hooks?.afterSanitize
 
-  // Sanitize the DOM tree (with hooks support)
-  sanitizeNode(fragment, config, options.hooks)
+  if (useDirectStringPath) {
+    const parsedDocument = parseDocumentWithRuntime(processedHtml, dom)
+    sanitizeNode(parsedDocument.body, policy)
+    return parsedDocument.body.innerHTML
+  }
 
-  // Check for and remove mXSS patterns (Phase 2)
-  if (config.detectMXSS) {
+  const fragment = parseHTMLWithRuntime(processedHtml, dom)
+
+  // User hooks run only in this pass.
+  sanitizeNode(fragment, policy, hooks)
+
+  if (config.detectMXSS && hooks?.afterSanitize) {
     sanitizeMXSS(fragment, true)
   }
 
-  // Call afterSanitize hook (Phase 2)
   let finalFragment = fragment
-  if (options.hooks?.afterSanitize) {
-    const hookResult = options.hooks.afterSanitize(fragment)
-    if (hookResult instanceof DocumentFragment) {
+  if (hooks?.afterSanitize) {
+    const hookResult = hooks.afterSanitize(fragment)
+    if (isDocumentFragment(hookResult)) {
       finalFragment = hookResult
     }
   }
 
-  // Return as string or DocumentFragment
-  if (config.returnString) {
-    return serializeHTML(finalFragment)
+  if (hooks?.onElement || hooks?.onAttribute || hooks?.afterSanitize) {
+    // Hooks can change nodes that the first traversal already processed. This
+    // pass has no hooks, so every current element and attribute is revalidated.
+    sanitizeNode(finalFragment, policy)
   }
 
-  return finalFragment
+  if (config.detectMXSS) {
+    sanitizeMXSS(finalFragment, true)
+    finalFragment = stabilizeMXSS(finalFragment, policy, dom)
+  }
+
+  if (!config.returnString) return finalFragment
+
+  const hooksCanRetainNodes = Boolean(
+    hooks?.onElement || hooks?.onAttribute || hooks?.afterSanitize
+  )
+  return hooksCanRetainNodes
+    ? serializeHTML(finalFragment)
+    : consumeAndSerializeHTML(finalFragment)
 }
 
 /**
- * Sanitize a DOM node and its children (recursive)
- *
- * Traverses the DOM tree and:
- * - Removes dangerous tags
- * - Removes dangerous attributes
- * - Keeps text content (if keepTextContent is true)
- *
- * @param node - Node to sanitize
- * @param config - Sanitization configuration
+ * Sanitize a DOM node and its descendants.
  */
-function sanitizeNode(node: Node, config: Required<Omit<SanitizeOptions, 'hooks'>>, hooks?: SanitizeHooks): void {
-  // Get all child nodes (NodeList)
-  const children = Array.from(node.childNodes)
+function sanitizeNode(
+  node: Node,
+  policy: SanitizationPolicy,
+  hooks?: SanitizeHooks
+): void {
+  const config = policy.config
+  let child = node.firstChild
 
-  for (const child of children) {
-    // Handle Element nodes (tags)
-    if (child.nodeType === Node.ELEMENT_NODE) {
+  while (child) {
+    const next = child.nextSibling
+    if (child.nodeType === ELEMENT_NODE) {
       const element = child as Element
-      const tagName = normalizeTagName(element.tagName)
+      const tagName = element.localName.toLowerCase()
 
-      // Check if tag is allowed
-      const tagAllowed = isTagAllowed(tagName, config.allowedTags)
-
-      if (!tagAllowed) {
-        // Tag is not allowed
-        // SECURITY: Never keep text content from dangerous tags (script, style, etc.)
-        const dangerous = isDangerousTag(tagName)
-
-        if (!dangerous && (config.stripTags || config.keepTextContent)) {
-          // Keep text content for non-dangerous tags (like form, input, button)
-          const textContent = element.textContent
-          if (textContent) {
-            const textNode = document.createTextNode(textContent)
-            node.replaceChild(textNode, element)
-          } else {
-            node.removeChild(element)
-          }
-        } else {
-          // Remove dangerous tags entirely (script, style, iframe, etc.)
-          node.removeChild(element)
-        }
+      if (isDangerousTagNormalized(tagName)) {
+        node.removeChild(element)
+        child = next
         continue
       }
 
-      // Call onElement hook (Phase 2)
+      if (!policy.allowedTags.has(tagName)) {
+        if (config.stripTags || config.keepTextContent) {
+          sanitizeNode(element, policy, hooks)
+          unwrapElement(element)
+        } else {
+          node.removeChild(element)
+        }
+        child = next
+        continue
+      }
+
       if (hooks?.onElement) {
         const hookResult = hooks.onElement(element)
         if (hookResult === false) {
-          // Hook requested element removal
           node.removeChild(element)
+          child = next
           continue
         }
       }
 
-      // Tag is allowed, sanitize attributes
-      sanitizeAttributes(element, tagName, config, hooks)
+      sanitizeAttributes(element, tagName, policy, hooks)
+      sanitizeNode(element, policy, hooks)
 
-      // Recursively sanitize children
-      sanitizeNode(element, config, hooks)
-    }
-    // Handle Text nodes (keep as-is)
-    else if (child.nodeType === Node.TEXT_NODE) {
-      // Text nodes are safe, no action needed
-      continue
-    }
-    // Handle Comment nodes (remove)
-    else if (child.nodeType === Node.COMMENT_NODE) {
-      node.removeChild(child)
-    }
-    // Handle other nodes (remove to be safe)
-    else {
-      node.removeChild(child)
-    }
-  }
-}
-
-/**
- * Sanitize attributes of an element
- *
- * Removes dangerous attributes:
- * - Event handlers (onclick, onerror, etc.)
- * - Dangerous URL protocols (javascript:, data:, etc.)
- * - Forbidden attributes (formaction, etc.)
- *
- * @param element - Element to sanitize
- * @param tagName - Tag name (lowercase)
- * @param config - Sanitization configuration
- * @param hooks - Optional hooks for customization (Phase 2)
- */
-function sanitizeAttributes(element: Element, tagName: string, config: Required<Omit<SanitizeOptions, 'hooks'>>, hooks?: SanitizeHooks): void {
-  // Get all attributes
-  const attributes = Array.from(element.attributes)
-
-  for (const attr of attributes) {
-    let attrName = attr.name
-    let attrValue = attr.value
-
-    // Normalize attribute name
-    if (config.lowercaseAttributes) {
-      attrName = normalizeAttributeName(attrName)
-    }
-
-    // Call onAttribute hook (Phase 2)
-    if (hooks?.onAttribute) {
-      const hookResult = hooks.onAttribute(element, attrName, attrValue)
-      if (hookResult === false) {
-        // Hook requested attribute removal
-        element.removeAttribute(attr.name)
-        continue
+      // stripTags applies to allowed elements as well as unknown wrappers.
+      if (config.stripTags) {
+        unwrapElement(element)
       }
+    } else if (child.nodeType === TEXT_NODE) {
+      // Text nodes are safe.
+    } else if (child.nodeType === COMMENT_NODE) {
+      node.removeChild(child)
+    } else {
+      node.removeChild(child)
     }
 
-    // Validate attribute
-    const validation = validateAttribute(
-      tagName,
-      attrName,
-      attrValue,
-      config.allowedAttributes,
-      config
-    )
-
-    if (!validation.allowed) {
-      // Attribute is not allowed, remove it
-      element.removeAttribute(attr.name)
-    } else if (validation.sanitizedValue !== undefined) {
-      // Attribute value was sanitized, update it
-      element.setAttribute(attr.name, validation.sanitizedValue)
-    }
+    child = next
   }
 }
 
 /**
- * Create a reusable sanitizer instance with preset configuration
- *
- * Useful for sanitizing multiple HTML strings with the same options.
- * Avoids re-merging options on every call.
- *
- * @param options - Sanitization options
- * @returns Sanitizer instance
- *
- * @example
- * const sanitizer = createSanitizer({ allowClassAttribute: true })
- * sanitizer.sanitize('<p class="text">Hello</p>') // '<p class="text">Hello</p>'
- * sanitizer.sanitize('<script>alert(1)</script>') // ''
+ * Move an element's sanitized children into its parent, then remove the
+ * element itself.
  */
-export function createSanitizer(options: Partial<SanitizeOptions> = {}) {
-  // Merge options once
-  const config: Required<Omit<SanitizeOptions, 'hooks'>> = {
-    ...DEFAULT_OPTIONS,
-    ...options,
-    allowedTags: options.allowedTags ?? DEFAULT_OPTIONS.allowedTags,
-    allowedAttributes: options.allowedAttributes ?? DEFAULT_OPTIONS.allowedAttributes,
-    allowedProtocols: options.allowedProtocols ?? DEFAULT_OPTIONS.allowedProtocols,
-    forbiddenAttributes: options.forbiddenAttributes ?? DEFAULT_OPTIONS.forbiddenAttributes,
-    allowAllAttributes: options.allowAllAttributes ?? DEFAULT_OPTIONS.allowAllAttributes,
+function unwrapElement(element: Element): void {
+  const parent = element.parentNode
+  if (!parent) {
+    return
   }
+
+  while (element.firstChild) {
+    parent.insertBefore(element.firstChild, element)
+  }
+  parent.removeChild(element)
+}
+
+/**
+ * Sanitize all current attributes of an element.
+ */
+function sanitizeAttributes(
+  element: Element,
+  tagName: string,
+  policy: SanitizationPolicy,
+  hooks?: SanitizeHooks
+): void {
+  if (hooks?.onAttribute) {
+    const attributes = Array.from(element.attributes)
+    for (const attr of attributes) {
+      sanitizeAttribute(element, tagName, attr, policy, hooks)
+    }
+    return
+  }
+
+  let index = 0
+  while (index < element.attributes.length) {
+    const attr = element.attributes.item(index)
+    if (!attr) break
+
+    const removed = sanitizeAttribute(element, tagName, attr, policy)
+    if (!removed) index++
+  }
+}
+
+function sanitizeAttribute(
+  element: Element,
+  tagName: string,
+  attr: Attr,
+  policy: SanitizationPolicy,
+  hooks?: SanitizeHooks
+): boolean {
+  const config = policy.config
+  const attrName = config.lowercaseAttributes ? attr.name.toLowerCase() : attr.name
+  const attrValue = attr.value
+
+  if (hooks?.onAttribute) {
+    const hookResult = hooks.onAttribute(element, attrName, attrValue)
+    if (hookResult === false) {
+      element.removeAttribute(attr.name)
+      return true
+    }
+  }
+
+  const validation = validateAttributeNormalized(
+    tagName,
+    attrName,
+    attrValue,
+    config.allowedAttributes,
+    config,
+    policy.attributes
+  )
+
+  if (!validation.allowed) {
+    element.removeAttribute(attr.name)
+    return true
+  }
+
+  if (validation.sanitizedValue !== undefined) {
+    element.setAttribute(attr.name, validation.sanitizedValue)
+  }
+  return false
+}
+
+/**
+ * Reparse and sanitize output until serialization is stable.
+ *
+ * If stability does not occur within the pass limit, return an empty fragment.
+ */
+function stabilizeMXSS(
+  fragment: DocumentFragment,
+  policy: SanitizationPolicy,
+  runtime: DOMRuntime
+): DocumentFragment {
+  let serialized = serializeHTML(fragment)
+
+  for (let pass = 0; pass < MAX_MXSS_STABILIZATION_PASSES; pass++) {
+    const reparsed = parseHTMLWithRuntime(serialized, runtime)
+    sanitizeNode(reparsed, policy)
+    sanitizeMXSS(reparsed, true)
+
+    const nextSerialized = serializeHTML(reparsed)
+    if (nextSerialized === serialized) {
+      return reparsed
+    }
+
+    serialized = nextSerialized
+  }
+
+  return runtime.document.createDocumentFragment()
+}
+
+function isDocumentFragment(value: unknown): value is DocumentFragment {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Node).nodeType === DOCUMENT_FRAGMENT_NODE &&
+    'childNodes' in value
+  )
+}
+
+/**
+ * Create a reusable sanitizer with preset configuration.
+ */
+export function createSanitizer(
+  options: Partial<SanitizeOptions> = EMPTY_OPTIONS,
+  runtime?: DOMRuntime
+): Sanitizer {
+  let config = resolveOptions(options)
+  let hooks = options.hooks
 
   return {
-    /**
-     * Sanitize HTML with preset configuration
-     */
     sanitize(html: string): string | DocumentFragment {
-      return sanitize(html, config)
+      return sanitizeWithPolicy(html, getPolicy(config), hooks, runtime)
     },
 
-    /**
-     * Get current configuration
-     */
-    getConfig(): Readonly<Required<Omit<SanitizeOptions, 'hooks'>>> {
-      return config
+    getConfig(): Readonly<ResolvedSanitizeOptions> {
+      return snapshotOptions(config)
     },
 
-    /**
-     * Update configuration
-     */
     updateConfig(newOptions: Partial<SanitizeOptions>): void {
-      Object.assign(config, newOptions)
+      config = mergeOptions(config, newOptions)
+      if (Object.prototype.hasOwnProperty.call(newOptions, 'hooks')) {
+        hooks = newOptions.hooks
+      }
     },
   }
 }
 
-/**
- * Convenience function: Sanitize with BASIC schema
- */
-export function sanitizeBasic(html: string): string {
-  return sanitize(html, BASIC_SCHEMA) as string
+export function sanitizeBasic(html: string, runtime?: DOMRuntime): string {
+  return sanitizeWithPolicy(html, getPolicy(BASIC_SCHEMA), undefined, runtime) as string
 }
 
-/**
- * Convenience function: Sanitize with RELAXED schema
- */
-export function sanitizeRelaxed(html: string): string {
-  return sanitize(html, RELAXED_SCHEMA) as string
+export function sanitizeRelaxed(html: string, runtime?: DOMRuntime): string {
+  return sanitizeWithPolicy(html, getPolicy(RELAXED_SCHEMA), undefined, runtime) as string
 }
 
-/**
- * Convenience function: Sanitize with STRICT schema
- */
-export function sanitizeStrict(html: string): string {
-  return sanitize(html, STRICT_SCHEMA) as string
+export function sanitizeStrict(html: string, runtime?: DOMRuntime): string {
+  return sanitizeWithPolicy(html, getPolicy(STRICT_SCHEMA), undefined, runtime) as string
 }

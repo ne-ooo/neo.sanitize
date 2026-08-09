@@ -7,13 +7,13 @@ Fast, secure, and lightweight HTML sanitization library that prevents XSS attack
 ## Features
 
 ✅ **Zero Dependencies** - Uses native browser DOMParser
-✅ **Secure by Default** - Blocks 143+ XSS vectors (OWASP compliant)
+✅ **Secure by Default** - Removes tested script, protocol, CSS, clobbering, and mutation-XSS patterns
 ✅ **Tree-Shakeable** - Import only what you need
 ✅ **TypeScript-First** - Full type safety with strict mode
 ✅ **Predefined Schemas** - BASIC, RELAXED, STRICT configurations
 ✅ **Customizable** - Fine-grained control over tags, attributes, and protocols
-✅ **Cross-Realm Safe** - Works in iframes and workers
-✅ **Lightweight** - < 3 KB gzipped
+✅ **Cross-Realm Safe** - Supports browser realms and explicit DOM runtimes
+✅ **Bundle Budget** - The ESM entry must stay within 15 KB gzipped
 
 ## Installation
 
@@ -39,7 +39,7 @@ const safe = sanitize(
 
 ## Security Features
 
-### XSS Protection (143 Test Vectors)
+### XSS Protection
 
 **Blocks Script Injection:**
 
@@ -72,7 +72,7 @@ sanitize('<style>body{background:url("javascript:alert(1)")}</style>'); // ''
 
 ## API
 
-### `sanitize(html, options?)`
+### `sanitize(html, options?, runtime?)`
 
 Sanitize an HTML string with optional configuration.
 
@@ -93,6 +93,7 @@ const result = sanitize("<p>Hello</p>", {
 
 - `html` (string) - HTML string to sanitize
 - `options` (object, optional) - Sanitization options
+- `runtime` (object, optional) - DOM runtime for Node.js or a Web Worker
 
 **Returns:** Sanitized HTML string (default) or DocumentFragment
 
@@ -146,7 +147,7 @@ sanitizeStrict("<script>alert(1)</script><p>Safe</p>");
 // Output: 'Safe'
 ```
 
-### `createSanitizer(options)`
+### `createSanitizer(options, runtime?)`
 
 Create a reusable sanitizer instance with preset configuration.
 
@@ -164,19 +165,44 @@ const sanitizer = createSanitizer({
 const result1 = sanitizer.sanitize("<p>Hello</p>");
 const result2 = sanitizer.sanitize('<a href="/">Link</a>');
 
-// Get current config
+// Get a detached, frozen configuration snapshot
 const config = sanitizer.getConfig();
 
 // Update config
 sanitizer.updateConfig({ allowDataAttributes: true });
 ```
 
+`getConfig()` returns a detached, frozen snapshot. `updateConfig()` replaces the internal configuration without changing earlier snapshots.
+
+### Node.js and Web Workers
+
+Node.js does not include the required DOM APIs. Install a DOM implementation and pass its runtime explicitly.
+
+```typescript
+import { JSDOM } from "jsdom";
+import { sanitize } from "@lpm.dev/neo.sanitize";
+
+const dom = new JSDOM("");
+const runtime = {
+  document: dom.window.document,
+  DOMParser: dom.window.DOMParser,
+};
+
+const clean = sanitize(dirtyHtml, {}, runtime);
+```
+
+Web Workers must also supply `{ document, DOMParser }`. The two APIs must come from the same compatible DOM implementation.
+
+Pass the runtime as the second argument to a preset helper. Pass it to `parseHTML` as the second argument.
+
+The `createSanitizer` function stores its runtime. Each call to its `sanitize` method uses that runtime.
+
 ## Configuration Options
 
 ```typescript
 interface SanitizeOptions {
   // Tag and attribute filtering
-  allowedTags?: string[]; // Default: 50+ safe HTML tags
+  allowedTags?: string[]; // Default: 50+ safe HTML tags. Active tags always stay blocked.
   allowedAttributes?: Record<string, string[]>; // Tag-specific attributes
   forbiddenAttributes?: string[]; // Default: 60+ event handlers
 
@@ -189,11 +215,11 @@ interface SanitizeOptions {
   allowClassAttribute?: boolean; // Allow class attribute
   allowIdAttribute?: boolean; // Allow id attribute
   allowStyleAttribute?: boolean; // Allow style attribute
-  allowAllAttributes?: boolean; // Allow all attributes (dangerous!)
+  allowAllAttributes?: string[]; // Tags that accept attributes outside the per-tag list
 
   // Content handling
-  keepTextContent?: boolean; // Keep text from removed tags (safe tags only)
-  stripTags?: boolean; // Remove tags but keep text content
+  keepTextContent?: boolean; // Unwrap safe removed elements and keep sanitized children
+  stripTags?: boolean; // Remove all wrappers and keep sanitized children
 
   // Output format
   returnString?: boolean; // Return string (default: true) or DocumentFragment
@@ -201,6 +227,9 @@ interface SanitizeOptions {
   // Normalization
   lowercaseTags?: boolean; // Normalize tag names to lowercase
   lowercaseAttributes?: boolean; // Normalize attribute names to lowercase
+
+  // Experimental mutation-XSS defenses
+  detectMXSS?: boolean; // Remove foreign namespaces and require stable output
 }
 ```
 
@@ -279,39 +308,20 @@ document.body.appendChild(fragment);
 
 ## Performance
 
-Benchmarks run on Node.js with jsdom, comparing against industry-standard libraries:
+The sanitizer caches resolved configuration, compiled policy lookups, and DOM parsers. Hook-free paths also avoid temporary arrays and unnecessary fragment cloning.
 
-### Small HTML (~50 chars)
+Local paired-build measurements used Node.js with jsdom. They showed these throughput changes against the previous build:
 
-- **sanitize-html:** 83,253 ops/sec (fastest) ⚡
-- **DOMPurify:** 14,145 ops/sec
-- **neo.sanitize:** 8,195 ops/sec
+| Input | Throughput change |
+| --- | ---: |
+| Small HTML | approximately 83% higher |
+| Medium HTML | approximately 167% higher |
+| HTML with XSS vectors | approximately 73% higher |
+| Large HTML | approximately 66% higher |
 
-### Medium HTML (~300 chars)
+These measurements are environment-specific and are not performance guarantees. Run `lpm run bench` in the target environment before making capacity decisions.
 
-- **sanitize-html:** 40,285 ops/sec (fastest) ⚡
-- **DOMPurify:** 3,750 ops/sec
-- **neo.sanitize:** 2,373 ops/sec
-
-### Large HTML (~1.5 KB)
-
-- **sanitize-html:** 18,052 ops/sec (fastest) ⚡
-- **neo.sanitize:** 1,431 ops/sec
-- **DOMPurify:** 1,277 ops/sec
-
-### HTML with XSS Vectors
-
-- **sanitize-html:** 81,844 ops/sec (fastest) ⚡
-- **DOMPurify:** 9,463 ops/sec
-- **neo.sanitize:** 6,235 ops/sec
-
-### High-Volume (1000 small HTML)
-
-- **sanitize-html:** 119 ops/sec (fastest) ⚡
-- **DOMPurify:** 13 ops/sec
-- **neo.sanitize:** 11 ops/sec
-
-**Note:** Phase 1 focuses on security and correctness. Performance optimizations are planned for Phase 2 and 3. sanitize-html is server-side only (uses htmlparser2), while neo.sanitize and DOMPurify are browser-compatible.
+For repeated calls with the same configuration, use `createSanitizer()`. It reuses the compiled configuration and policy sets.
 
 ## Browser Compatibility
 
@@ -319,13 +329,32 @@ Benchmarks run on Node.js with jsdom, comparing against industry-standard librar
 - ✅ Firefox 88+
 - ✅ Safari 14+
 - ✅ Edge 90+
-- ✅ Node.js 18+ (with jsdom)
+- ✅ Node.js 18+ (with an explicit DOM runtime)
+- ✅ Web Workers (with an explicit DOM runtime)
 
 **Requirements:**
 
 - DOMParser API
 - DocumentFragment API
 - ES2020+ features
+
+The package has no runtime dependency on jsdom. Applications select and install their DOM implementation.
+
+## Experimental mXSS Defense
+
+Set `detectMXSS: true` to enable the experimental mutation-XSS defense.
+
+This mode removes SVG, MathML, and all other foreign namespaces. It then sanitizes each reparsed result without hooks.
+
+The sanitizer runs a maximum of three stability passes. If serialization does not become stable, it returns empty output.
+
+This option can change before the next major release. When sanitized output must contain SVG or MathML, do not use this mode.
+
+## Hook Safety
+
+The sanitizer calls each configured hook once. Hooks can inspect or change the DOM during the first sanitization pass.
+
+After `afterSanitize`, a hook-free pass checks every current element and attribute. Hook output cannot bypass the configured policy.
 
 ## Security Guarantees
 
@@ -338,7 +367,13 @@ Benchmarks run on Node.js with jsdom, comparing against industry-standard librar
 ✅ **Meta Redirects** - `<meta http-equiv="refresh">`
 ✅ **Base Hijacking** - `<base>` tags
 ✅ **Link Injection** - `<link>` tags
-✅ **Form Tags** - `<form>`, `<input>`, `<button>` (unless explicitly allowed)
+✅ **Form Tags** - `<form>`, `<input>`, `<button>`
+
+The `allowedTags` option cannot enable active-content tags. This rule also applies to custom schemas.
+
+URL-list attributes use per-candidate protocol checks. These attributes include `srcset`, `imagesrcset`, `ping`, and `attributionsrc`.
+
+Strict CSS mode allows listed properties only. It also removes URL and dynamic CSS functions.
 
 ### What We Allow (Default)
 
@@ -354,25 +389,28 @@ Benchmarks run on Node.js with jsdom, comparing against industry-standard librar
 
 ## Testing
 
-143 comprehensive test cases covering OWASP XSS vectors:
+The suite contains 509 automated tests across 14 files. It covers sanitizer behavior, public configuration, hooks, runtimes, and XSS regression vectors.
 
-- ✅ 25 Script injection tests
-- ✅ 40 Event handler tests
-- ✅ 37 Protocol handler tests
-- ✅ 41 Basic vectors and edge cases
+Coverage must stay at or above 90% for statements, functions, and lines. Branch coverage must stay at or above 80%.
 
 ```bash
 # Run tests
-npm test
+lpm run test
+
+# Run tests with coverage gates
+lpm run test:coverage
+
+# Run all checks required before publication
+lpm run release:check
 
 # Run benchmarks
-npm run bench
+lpm run bench
 
 # Type check
-npm run typecheck
+lpm run typecheck
 
 # Build
-npm run build
+lpm run build
 ```
 
 ## Migration from DOMPurify
@@ -443,10 +481,10 @@ const clean: string = sanitize(html, options);
 Import only what you need for optimal bundle size:
 
 ```typescript
-// Import specific functions (< 1 KB)
+// Import a specific public function
 import { sanitize } from "@lpm.dev/neo.sanitize";
 
-// Import schema helpers (< 500 bytes each)
+// Import schema helpers
 import {
   sanitizeBasic,
   sanitizeRelaxed,
@@ -472,10 +510,12 @@ import { createSanitizer } from "@lpm.dev/neo.sanitize";
 
 - ✅ **Browser-native** (sanitize-html is server-only)
 - ✅ **Zero dependencies** (sanitize-html has 4 dependencies)
-- ✅ **Smaller bundle** (< 3 KB vs ~60 KB)
+- ✅ **No runtime dependencies** and a 15 KB gzip budget for the ESM entry
 - ✅ **TypeScript-first** (sanitize-html has community types)
 - ⚠️ Slower performance (sanitize-html uses htmlparser2)
 
 ## License
 
-MIT
+[MIT](LICENSE)
+
+Report vulnerabilities privately. Read the [security policy](SECURITY.md) for the reporting procedure.
