@@ -174,6 +174,24 @@ sanitizer.updateConfig({ allowDataAttributes: true });
 
 `getConfig()` returns a detached, frozen snapshot. `updateConfig()` replaces the internal configuration without changing earlier snapshots.
 
+### `compileSanitizeOptions(options?)`
+
+Use this function when repeated direct `sanitize()` calls need the same options but different runtime arguments.
+
+```typescript
+import { compileSanitizeOptions, sanitize } from "@lpm.dev/neo.sanitize";
+
+const options = compileSanitizeOptions({
+  allowedTags: ["p", "strong", "a"],
+  allowedAttributes: { a: ["href"] },
+});
+
+const first = sanitize(firstHtml, options, firstRuntime);
+const second = sanitize(secondHtml, options, secondRuntime);
+```
+
+The function returns a frozen options object and compiles its lookup sets. It does not accept hooks. Use `createSanitizer()` when hooks are necessary or when the options and runtime stay the same.
+
 ### Node.js and Web Workers
 
 Node.js does not include the required DOM APIs. Install a DOM implementation and pass its runtime explicitly.
@@ -224,12 +242,21 @@ interface SanitizeOptions {
   // Output format
   returnString?: boolean; // Return string (default: true) or DocumentFragment
 
+  // Resource limits (fail closed when exceeded)
+  maxInputLength?: number; // Default: 200,000 UTF-16 code units
+  maxDOMNodes?: number; // Default: 100,000 visited nodes per pass
+  maxDOMDepth?: number; // Default: 1,024 source elements
+
   // Normalization
   lowercaseTags?: boolean; // Normalize tag names to lowercase
   lowercaseAttributes?: boolean; // Normalize attribute names to lowercase
 
+  // Advanced security
+  preventDOMClobbering?: boolean; // Remove all id and name attributes
+  strictCSSValidation?: boolean; // XSS/resource filtering. Not layout isolation.
+
   // Experimental mutation-XSS defenses
-  detectMXSS?: boolean; // Remove foreign namespaces and require stable output
+  detectMXSS?: boolean; // Require stable output after reparsing
 }
 ```
 
@@ -308,20 +335,13 @@ document.body.appendChild(fragment);
 
 ## Performance
 
-The sanitizer caches resolved configuration, compiled policy lookups, and DOM parsers. Hook-free paths also avoid temporary arrays and unnecessary fragment cloning.
+The sanitizer caches built-in configuration, compiled policy lookups, and DOM parsers. Hook-free trees without denied wrappers use an in-place fast path.
 
-Local paired-build measurements used Node.js with jsdom. They showed these throughput changes against the previous build:
+When a denied wrapper retains children, the sanitizer rebuilds only that subtree. It appends each retained descendant one time.
 
-| Input | Throughput change |
-| --- | ---: |
-| Small HTML | approximately 83% higher |
-| Medium HTML | approximately 167% higher |
-| HTML with XSS vectors | approximately 73% higher |
-| Large HTML | approximately 66% higher |
+The benchmark suite covers regular documents, custom reusable policies, denied-wrapper nesting, nested CSS functions, and large URL lists. Measurements are environment-specific and are not performance guarantees. Run `lpm run bench` in the target environment before making capacity decisions.
 
-These measurements are environment-specific and are not performance guarantees. Run `lpm run bench` in the target environment before making capacity decisions.
-
-For repeated calls with the same configuration, use `createSanitizer()`. It reuses the compiled configuration and policy sets.
+For repeated calls with one configuration, use `createSanitizer()` or `compileSanitizeOptions()`. Both APIs reuse the compiled policy sets.
 
 ## Browser Compatibility
 
@@ -344,11 +364,13 @@ The package has no runtime dependency on jsdom. Applications select and install 
 
 Set `detectMXSS: true` to enable the experimental mutation-XSS defense.
 
-This mode removes SVG, MathML, and all other foreign namespaces. It then sanitizes each reparsed result without hooks.
+The sanitizer always removes SVG, MathML, and all other foreign namespaces. HTML policies do not support these namespaces.
+
+This mode sanitizes each reparsed result without hooks. It also requires stable output after reparsing.
 
 The sanitizer runs a maximum of three stability passes. If serialization does not become stable, it returns empty output.
 
-This option can change before the next major release. When sanitized output must contain SVG or MathML, do not use this mode.
+This option can change before the next major release. If output must contain SVG or MathML, use a separate namespace-aware sanitizer.
 
 ## Hook Safety
 
@@ -371,9 +393,19 @@ After `afterSanitize`, a hook-free pass checks every current element and attribu
 
 The `allowedTags` option cannot enable active-content tags. This rule also applies to custom schemas.
 
+The `allowedTags` option cannot enable SVG, MathML, or another foreign namespace. The sanitizer supports HTML policies only.
+
 URL-list attributes use per-candidate protocol checks. These attributes include `srcset`, `imagesrcset`, `ping`, and `attributionsrc`.
 
 Strict CSS mode allows listed properties only. It also removes URL and dynamic CSS functions.
+
+Strict CSS mode does not make attacker-controlled layout safe. It still permits properties that can reposition or cover page content. Leave `allowStyleAttribute` disabled for untrusted content unless the containing application provides separate layout isolation.
+
+Before parsing, the sanitizer accepts at most 200,000 UTF-16 code units. It also runs a bounded HTML-state depth preflight.
+
+The preflight covers raw text, comments, malformed tags, foreign namespaces, and implicit table depth. After parsing, the sanitizer accepts at most 100,000 nodes and 1,024 DOM levels.
+
+Each limit is configurable. Exceeding a limit returns an empty string or empty fragment.
 
 ### What We Allow (Default)
 
@@ -389,9 +421,11 @@ Strict CSS mode allows listed properties only. It also removes URL and dynamic C
 
 ## Testing
 
-The suite contains 509 automated tests across 14 files. It covers sanitizer behavior, public configuration, hooks, runtimes, and XSS regression vectors.
+The suite contains 540 automated tests across 14 files. It covers sanitizer behavior, configuration, resource limits, hooks, runtimes, and XSS regression vectors.
 
 Coverage must stay at or above 90% for statements, functions, and lines. Branch coverage must stay at or above 80%.
+
+CI tests Node.js 18, 20, and 22. A separate job checks scaling, allocation, runtime output parity, nested CSS, and URL-list short-circuiting.
 
 ```bash
 # Run tests
@@ -405,6 +439,9 @@ lpm run release:check
 
 # Run benchmarks
 lpm run bench
+
+# Run deterministic performance regression checks after a build
+lpm run test:performance
 
 # Type check
 lpm run typecheck

@@ -4,6 +4,7 @@
 
 import type {
   DOMRuntime,
+  CompiledSanitizeOptions,
   SanitizeHooks,
   SanitizeOptions,
   Sanitizer,
@@ -22,14 +23,20 @@ import {
 import { isDangerousTagNormalized } from '../validators/tags.js'
 import { validateAttributeNormalized } from '../validators/attributes.js'
 import type { AttributeValidationPolicy } from '../validators/attributes.js'
-import { sanitizeMXSS } from '../validators/mxss.js'
+import { isForeignNamespace, sanitizeMXSS } from '../validators/mxss.js'
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
-const COMMENT_NODE = 8
 const DOCUMENT_FRAGMENT_NODE = 11
 const MAX_MXSS_STABILIZATION_PASSES = 3
 const EMPTY_OPTIONS: Partial<SanitizeOptions> = Object.freeze({})
+const PREFLIGHT_VOID_TAGS = new Set(
+  'area base br col embed hr img input link meta param source track wbr'.split(' ')
+)
+const P_ENDING_TAGS = new Set(
+  'address article aside blockquote div dl fieldset footer form h1 h2 h3 h4 h5 h6 header hgroup hr main nav ol p pre section table ul'.split(' ')
+)
+const PREFLIGHT_TABLE_SECTION_TAGS = new Set('tbody thead tfoot'.split(' '))
 
 interface SanitizationPolicy {
   config: ResolvedSanitizeOptions
@@ -37,7 +44,17 @@ interface SanitizationPolicy {
   attributes: AttributeValidationPolicy
 }
 
+interface TraversalBudget {
+  visitedNodes: number
+}
+
+interface StabilizedMXSS {
+  fragment: DocumentFragment
+  serialized: string
+}
+
 const POLICY_CACHE = new WeakMap<ResolvedSanitizeOptions, SanitizationPolicy>()
+const COMPILED_CONFIGS = new WeakSet<object>()
 
 function getPolicy(config: ResolvedSanitizeOptions): SanitizationPolicy {
   const cached = POLICY_CACHE.get(config)
@@ -63,6 +80,10 @@ function getPolicy(config: ResolvedSanitizeOptions): SanitizationPolicy {
 }
 
 function resolveOptions(options: Partial<SanitizeOptions>): ResolvedSanitizeOptions {
+  if (COMPILED_CONFIGS.has(options)) {
+    return options as ResolvedSanitizeOptions
+  }
+
   if (
     options === EMPTY_OPTIONS ||
     options === DEFAULT_OPTIONS ||
@@ -88,6 +109,25 @@ function resolveOptions(options: Partial<SanitizeOptions>): ResolvedSanitizeOpti
   }
 
   return mergeOptions(DEFAULT_OPTIONS, options)
+}
+
+/**
+ * Create frozen options and compile their lookup policy for repeated direct
+ * sanitize() calls. Hooks remain call-specific and are not part of the result.
+ */
+export function compileSanitizeOptions(
+  options: Partial<Omit<SanitizeOptions, 'hooks'>> = EMPTY_OPTIONS
+): CompiledSanitizeOptions {
+  if ('hooks' in options) {
+    throw new TypeError(
+      'compileSanitizeOptions() rejects hooks. Use createSanitizer().'
+    )
+  }
+
+  const config = snapshotOptions(resolveOptions(options))
+  COMPILED_CONFIGS.add(config)
+  getPolicy(config)
+  return config
 }
 
 /**
@@ -123,11 +163,31 @@ function sanitizeWithPolicy(
   }
 
   let processedHtml = html
+  if (processedHtml.length > config.maxInputLength) {
+    return config.returnString
+      ? ''
+      : resolveDOMRuntime(runtime).document.createDocumentFragment()
+  }
+
   if (hooks?.beforeSanitize) {
     const hookResult = hooks.beforeSanitize(html)
     if (typeof hookResult === 'string') {
       processedHtml = hookResult
     }
+  }
+
+  // Enforce the limit after beforeSanitize because a hook can replace a small
+  // input with a much larger string.
+  if (processedHtml.length > config.maxInputLength) {
+    return config.returnString
+      ? ''
+      : resolveDOMRuntime(runtime).document.createDocumentFragment()
+  }
+
+  if (exceedsMarkupDepth(processedHtml, config.maxDOMDepth)) {
+    return config.returnString
+      ? ''
+      : resolveDOMRuntime(runtime).document.createDocumentFragment()
   }
 
   const dom = resolveDOMRuntime(runtime)
@@ -139,15 +199,31 @@ function sanitizeWithPolicy(
     !hooks?.afterSanitize
 
   if (useDirectStringPath) {
-    const parsedDocument = parseDocumentWithRuntime(processedHtml, dom)
-    sanitizeNode(parsedDocument.body, policy)
+    let parsedDocument: Document
+    try {
+      parsedDocument = parseDocumentWithRuntime(processedHtml, dom)
+    } catch {
+      return ''
+    }
+    if (!sanitizeNodeInPlace(parsedDocument.body, policy)) return ''
     return parsedDocument.body.innerHTML
   }
 
-  const fragment = parseHTMLWithRuntime(processedHtml, dom)
+  let fragment: DocumentFragment
+  try {
+    fragment = parseHTMLWithRuntime(processedHtml, dom)
+  } catch {
+    return config.returnString ? '' : dom.document.createDocumentFragment()
+  }
 
   // User hooks run only in this pass.
-  sanitizeNode(fragment, policy, hooks)
+  const traversalHooks = hooks?.onElement || hooks?.onAttribute ? hooks : undefined
+  const sanitizedFragment = sanitizeNode(fragment, policy, traversalHooks, dom.document)
+  if (!sanitizedFragment) {
+    return config.returnString ? '' : dom.document.createDocumentFragment()
+  }
+
+  fragment = sanitizedFragment
 
   if (config.detectMXSS && hooks?.afterSanitize) {
     sanitizeMXSS(fragment, true)
@@ -164,15 +240,23 @@ function sanitizeWithPolicy(
   if (hooks?.onElement || hooks?.onAttribute || hooks?.afterSanitize) {
     // Hooks can change nodes that the first traversal already processed. This
     // pass has no hooks, so every current element and attribute is revalidated.
-    sanitizeNode(finalFragment, policy)
+    const revalidated = sanitizeNode(finalFragment, policy, undefined, dom.document)
+    if (!revalidated) {
+      return config.returnString ? '' : dom.document.createDocumentFragment()
+    }
+    finalFragment = revalidated
   }
 
+  let stabilizedSerialization: string | undefined
   if (config.detectMXSS) {
     sanitizeMXSS(finalFragment, true)
-    finalFragment = stabilizeMXSS(finalFragment, policy, dom)
+    const stabilized = stabilizeMXSS(finalFragment, policy, dom)
+    finalFragment = stabilized.fragment
+    stabilizedSerialization = stabilized.serialized
   }
 
   if (!config.returnString) return finalFragment
+  if (stabilizedSerialization !== undefined) return stabilizedSerialization
 
   const hooksCanRetainNodes = Boolean(
     hooks?.onElement || hooks?.onAttribute || hooks?.afterSanitize
@@ -183,81 +267,585 @@ function sanitizeWithPolicy(
 }
 
 /**
+ * Reject obviously excessive raw markup nesting before invoking a third-party
+ * DOM runtime. The DOM traversal remains authoritative because HTML tree
+ * construction can repair malformed markup in ways a bounded preflight cannot.
+ */
+function exceedsMarkupDepth(html: string, maximumDepth: number): boolean {
+  const openTags: Array<{
+    name: string
+    foreign: boolean
+    depthContribution: number
+  }> = []
+  let trackedDepth = 0
+  let openHTMLSelectTags = 0
+  let index = 0
+
+  const popOpenTag = (): void => {
+    const frame = openTags.pop()
+    if (!frame) return
+    trackedDepth -= frame.depthContribution
+    if (!frame.foreign && frame.name === 'select') openHTMLSelectTags--
+  }
+
+  while (index < html.length) {
+    const currentFrame = openTags[openTags.length - 1]
+    if (!currentFrame?.foreign && currentFrame?.name === 'plaintext') return false
+    if (
+      !currentFrame?.foreign &&
+      currentFrame &&
+      PREFLIGHT_RAW_TEXT_TAGS.has(currentFrame.name)
+    ) {
+      const rawTextEnd = currentFrame.name === 'script'
+        ? findScriptTextEnd(html, index)
+        : findRawTextEnd(html, index, currentFrame.name)
+      if (!rawTextEnd) return false
+      popOpenTag()
+      index = rawTextEnd
+      continue
+    }
+
+    const tagStart = html.indexOf('<', index)
+    if (tagStart === -1) return false
+
+    if (currentFrame?.foreign && html.startsWith('<![CDATA[', tagStart)) {
+      // Foreign namespaces are unsupported and removed. Reject CDATA instead
+      // of guessing whether an SVG/MathML integration point returned to HTML.
+      return true
+    }
+
+    if (html.startsWith('<!--', tagStart)) {
+      const commentEnd = findCommentEnd(html, tagStart)
+      if (commentEnd === -1) return false
+      index = commentEnd
+      continue
+    }
+
+    const nextCharacter = html[tagStart + 1] ?? ''
+    if (nextCharacter === '!' || nextCharacter === '?') {
+      const commentEnd = html.indexOf('>', tagStart + 2)
+      if (commentEnd === -1) return false
+      index = commentEnd + 1
+      continue
+    }
+
+    const closingTag = nextCharacter === '/'
+    const nameStart = tagStart + (closingTag ? 2 : 1)
+    if (!isASCIIAlpha(html[nameStart] ?? '')) {
+      if (closingTag) {
+        const commentEnd = html.indexOf('>', nameStart)
+        if (commentEnd === -1) return false
+        index = commentEnd + 1
+      } else {
+        index = tagStart + 1
+      }
+      continue
+    }
+
+    let cursor = nameStart
+    while (cursor < html.length && !isHTMLTagNameDelimiter(html[cursor] ?? '')) {
+      cursor++
+    }
+
+    const tagName = asciiLowercase(html.slice(nameStart, cursor))
+    const tagEnd = findTagEnd(html, cursor)
+    if (tagEnd === -1) return false
+
+    if (closingTag) {
+      // Only trust a close that matches the lexical stack. The HTML parser can
+      // ignore malformed or out-of-scope end tags, so wider popping is unsafe.
+      if (openTags[openTags.length - 1]?.name === tagName) popOpenTag()
+      index = tagEnd
+      continue
+    }
+
+    if (
+      PREFLIGHT_RAW_TEXT_TAGS.has(tagName) &&
+      tagName !== 'script' &&
+      tagName !== 'textarea' &&
+      openHTMLSelectTags > 0
+    ) {
+      return true
+    }
+
+    if (
+      openTags[openTags.length - 1]?.foreign &&
+      PREFLIGHT_RAW_TEXT_TAGS.has(tagName)
+    ) {
+      return true
+    }
+
+    const top = openTags[openTags.length - 1]
+    if (
+      !top?.foreign &&
+      ((top?.name === 'p' && P_ENDING_TAGS.has(tagName)) ||
+      (top?.name === 'li' && tagName === 'li') ||
+      ((top?.name === 'dt' || top?.name === 'dd') && (tagName === 'dt' || tagName === 'dd')) ||
+      (top?.name === 'tr' && tagName === 'tr') ||
+      ((top?.name === 'th' || top?.name === 'td') && (tagName === 'th' || tagName === 'td')) ||
+      (top?.name === 'option' && (tagName === 'option' || tagName === 'optgroup')) ||
+      ((top?.name === 'thead' || top?.name === 'tbody' || top?.name === 'tfoot') &&
+        (tagName === 'thead' || tagName === 'tbody' || tagName === 'tfoot'))
+      )
+    ) {
+      popOpenTag()
+    }
+
+    // In HTML, a trailing slash does not close ordinary or custom elements.
+    // Count every non-void tag so `<div/>` cannot bypass the parser preflight.
+    const parentIsForeign = openTags[openTags.length - 1]?.foreign ?? false
+    if (parentIsForeign || !PREFLIGHT_VOID_TAGS.has(tagName)) {
+      const depthContribution = 1 + getImplicitTableDepth(
+        tagName,
+        openTags[openTags.length - 1]
+      )
+      const foreign = parentIsForeign || tagName === 'svg' || tagName === 'math'
+      openTags.push({
+        name: tagName,
+        foreign,
+        depthContribution,
+      })
+      trackedDepth += depthContribution
+      if (!foreign && tagName === 'select') openHTMLSelectTags++
+      if (trackedDepth > maximumDepth) return true
+    }
+
+    index = tagEnd
+  }
+
+  return false
+}
+
+function getImplicitTableDepth(
+  tagName: string,
+  parent: { name: string; foreign: boolean } | undefined
+): number {
+  if (parent?.foreign) return 0
+
+  if (tagName === 'tr') {
+    return parent && PREFLIGHT_TABLE_SECTION_TAGS.has(parent.name) ? 0 : 1
+  }
+
+  if (tagName === 'td' || tagName === 'th') {
+    if (parent?.name === 'tr') return 0
+    if (parent && PREFLIGHT_TABLE_SECTION_TAGS.has(parent.name)) return 1
+    return 2
+  }
+
+  return 0
+}
+
+const PREFLIGHT_RAW_TEXT_TAGS = new Set(
+  'iframe noembed noframes plaintext script style textarea title xmp'.split(' ')
+)
+
+function isASCIIAlpha(character: string): boolean {
+  const code = character.charCodeAt(0)
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+function isASCIIWhitespace(character: string): boolean {
+  return (
+    character === ' ' ||
+    character === '\t' ||
+    character === '\n' ||
+    character === '\f' ||
+    character === '\r'
+  )
+}
+
+function isHTMLTagNameDelimiter(character: string): boolean {
+  return character === '/' || character === '>' || isASCIIWhitespace(character)
+}
+
+function asciiLowercase(value: string): string {
+  let result = ''
+  for (const character of value) {
+    const code = character.charCodeAt(0)
+    result += code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : character
+  }
+  return result
+}
+
+/** Find a tag's closing bracket with HTML-compatible attribute states. */
+function findTagEnd(html: string, start: number): number {
+  let state = 0
+
+  for (let index = start; index < html.length; index++) {
+    const character = html[index] ?? ''
+
+    if (state === 4) {
+      if (character === '"') state = 7
+      continue
+    }
+    if (state === 5) {
+      if (character === "'") state = 7
+      continue
+    }
+    if (state === 6) {
+      if (isASCIIWhitespace(character)) state = 0
+      else if (character === '>') return index + 1
+      continue
+    }
+    if (state === 1) {
+      if (isASCIIWhitespace(character)) state = 2
+      else if (character === '/') state = 8
+      else if (character === '=') state = 3
+      else if (character === '>') return index + 1
+      continue
+    }
+    if (state === 2) {
+      if (isASCIIWhitespace(character)) continue
+      if (character === '/') state = 8
+      else if (character === '=') state = 3
+      else if (character === '>') return index + 1
+      else state = 1
+      continue
+    }
+    if (state === 3) {
+      if (isASCIIWhitespace(character)) continue
+      if (character === '"') state = 4
+      else if (character === "'") state = 5
+      else if (character === '>') return index + 1
+      else state = 6
+      continue
+    }
+    if (state === 7) {
+      if (isASCIIWhitespace(character)) state = 0
+      else if (character === '/') state = 8
+      else if (character === '>') return index + 1
+      else {
+        state = 0
+        index--
+      }
+      continue
+    }
+    if (state === 8) {
+      if (character === '>') return index + 1
+      state = 0
+      if (!isASCIIWhitespace(character)) index--
+      continue
+    }
+
+    if (isASCIIWhitespace(character)) continue
+    if (character === '/') state = 8
+    else if (character === '>') return index + 1
+    else state = 1
+  }
+
+  return -1
+}
+
+/** Return the position after a real HTML comment terminator. */
+function findCommentEnd(html: string, start: number): number {
+  const contentStart = start + 4
+  if (html[contentStart] === '>') return contentStart + 1
+  if (html[contentStart] === '-' && html[contentStart + 1] === '>') {
+    return contentStart + 2
+  }
+
+  const normalEnd = html.indexOf('-->', contentStart)
+  const bangEnd = html.indexOf('--!>', contentStart)
+  if (normalEnd === -1) return bangEnd === -1 ? -1 : bangEnd + 4
+  if (bangEnd === -1 || normalEnd < bangEnd) return normalEnd + 3
+  return bangEnd + 4
+}
+
+/** Find the appropriate closing token for RAWTEXT, RCDATA, or script data. */
+function findRawTextEnd(html: string, start: number, tagName: string): number | null {
+  let searchStart = start
+
+  while (searchStart < html.length) {
+    const candidate = html.indexOf('</', searchStart)
+    if (candidate === -1) return null
+
+    const nameStart = candidate + 2
+    if (!isASCIIAlpha(html[nameStart] ?? '')) {
+      searchStart = nameStart
+      continue
+    }
+
+    let nameEnd = nameStart
+    while (nameEnd < html.length && !isHTMLTagNameDelimiter(html[nameEnd] ?? '')) {
+      nameEnd++
+    }
+
+    const candidateName = asciiLowercase(html.slice(nameStart, nameEnd))
+    if (candidateName === tagName) {
+      const tagEnd = findTagEnd(html, nameEnd)
+      return tagEnd === -1 ? null : tagEnd
+    }
+
+    searchStart = Math.max(nameEnd, nameStart + 1)
+  }
+
+  return null
+}
+
+/** Find a real script end tag across escaped and double-escaped script data. */
+function findScriptTextEnd(html: string, start: number): number | null {
+  let state = 0
+  let index = start
+
+  while (index < html.length) {
+    if (state === 0 && html.startsWith('<!--', index)) {
+      state = 1
+      index += 4
+      continue
+    }
+
+    if (state === 1 && html.startsWith('-->', index)) {
+      state = 0
+      index += 3
+      continue
+    }
+
+    if (html[index] !== '<') {
+      index++
+      continue
+    }
+
+    const closingTag = html[index + 1] === '/'
+    const nameStart = index + (closingTag ? 2 : 1)
+    const nameEnd = findMatchingTagNameEnd(html, nameStart, 'script')
+    if (nameEnd === -1) {
+      index++
+      continue
+    }
+
+    if (closingTag) {
+      if (state === 2) {
+        state = 1
+        index = nameEnd + 1
+        continue
+      }
+
+      const tagEnd = findTagEnd(html, nameEnd)
+      return tagEnd === -1 ? null : tagEnd
+    }
+
+    if (state === 1) state = 2
+    index = nameEnd + 1
+  }
+
+  return null
+}
+
+function findMatchingTagNameEnd(
+  html: string,
+  nameStart: number,
+  expectedName: string
+): number {
+  if (!isASCIIAlpha(html[nameStart] ?? '')) return -1
+
+  let nameEnd = nameStart
+  while (nameEnd < html.length && !isHTMLTagNameDelimiter(html[nameEnd] ?? '')) {
+    nameEnd++
+  }
+
+  return asciiLowercase(html.slice(nameStart, nameEnd)) === expectedName
+    ? nameEnd
+    : -1
+}
+
+/**
  * Sanitize a DOM node and its descendants.
  */
 function sanitizeNode(
   node: Node,
   policy: SanitizationPolicy,
-  hooks?: SanitizeHooks
-): void {
-  const config = policy.config
-  let child = node.firstChild
+  hooks: SanitizeHooks | undefined,
+  outputDocument: Document
+): DocumentFragment | null {
+  if (!hooks && isDocumentFragment(node)) {
+    if (!sanitizeNodeInPlace(node, policy)) return null
+    return node
+  }
 
-  while (child) {
-    const next = child.nextSibling
+  return buildSanitizedFragment(node, policy, hooks, outputDocument)
+}
+
+/**
+ * Sanitize in place. Rebuild only denied subtrees that must retain children.
+ * A shared budget prevents rebuilt descendants from being counted twice.
+ */
+function sanitizeNodeInPlace(
+  node: Node,
+  policy: SanitizationPolicy,
+  budget: TraversalBudget = { visitedNodes: 0 }
+): boolean {
+  const config = policy.config
+  const stack: Array<{ child: ChildNode | null; depth: number }> = [
+    { child: node.firstChild, depth: 1 },
+  ]
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]
+    if (!frame) break
+
+    const child = frame.child
+    if (!child) {
+      stack.pop()
+      continue
+    }
+    frame.child = child.nextSibling
+
+    budget.visitedNodes++
+    if (budget.visitedNodes > config.maxDOMNodes) return false
     if (child.nodeType === ELEMENT_NODE) {
       const element = child as Element
-      const tagName = element.localName.toLowerCase()
+      if (frame.depth > config.maxDOMDepth) return false
 
-      if (isDangerousTagNormalized(tagName)) {
-        node.removeChild(element)
-        child = next
+      const tagName = element.localName.toLowerCase()
+      if (isForeignNamespace(element) || isDangerousTagNormalized(tagName)) {
+        element.parentNode?.removeChild(element)
         continue
       }
 
       if (!policy.allowedTags.has(tagName)) {
         if (config.stripTags || config.keepTextContent) {
-          sanitizeNode(element, policy, hooks)
-          unwrapElement(element)
-        } else {
-          node.removeChild(element)
+          const promoted = buildSanitizedFragment(
+            element,
+            policy,
+            undefined,
+            element.ownerDocument,
+            budget,
+            frame.depth + 1
+          )
+          if (!promoted) return false
+
+          const parent = element.parentNode
+          if (parent) {
+            parent.insertBefore(promoted, element)
+            parent.removeChild(element)
+          }
+          continue
         }
-        child = next
+        element.parentNode?.removeChild(element)
+        continue
+      }
+
+      if (config.stripTags) {
+        const promoted = buildSanitizedFragment(
+          element,
+          policy,
+          undefined,
+          element.ownerDocument,
+          budget,
+          frame.depth + 1
+        )
+        if (!promoted) return false
+
+        const parent = element.parentNode
+        if (parent) {
+          parent.insertBefore(promoted, element)
+          parent.removeChild(element)
+        }
+        continue
+      }
+      sanitizeAttributes(element, tagName, policy)
+      stack.push({ child: element.firstChild, depth: frame.depth + 1 })
+    } else if (child.nodeType !== TEXT_NODE) {
+      child.parentNode?.removeChild(child)
+    }
+  }
+
+  return true
+}
+
+/** Build sanitized output while appending each retained node only once. */
+function buildSanitizedFragment(
+  node: Node,
+  policy: SanitizationPolicy,
+  hooks: SanitizeHooks | undefined,
+  outputDocument: Document,
+  budget: TraversalBudget = { visitedNodes: 0 },
+  initialDepth = 1
+): DocumentFragment | null {
+  const config = policy.config
+  const output = outputDocument.createDocumentFragment()
+  const stack: Array<{
+    child: ChildNode | null
+    depth: number
+    destination: Node
+  }> = [{ child: node.firstChild, depth: initialDepth, destination: output }]
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]
+    if (!frame) break
+
+    const child = frame.child
+    if (!child) {
+      stack.pop()
+      continue
+    }
+
+    budget.visitedNodes++
+    if (budget.visitedNodes > config.maxDOMNodes) return null
+
+    // Capture the next sibling before hooks or removals can mutate the tree.
+    frame.child = child.nextSibling
+
+    if (child.nodeType === ELEMENT_NODE) {
+      const element = child as Element
+      const tagName = element.localName.toLowerCase()
+
+      // Bound DOM depth before the DOM implementation's own serializer can
+      // exhaust the JavaScript stack. Over-limit input fails closed.
+      if (frame.depth > config.maxDOMDepth) return null
+
+      // HTML policies are not namespace-aware. Retaining SVG, MathML, or
+      // other foreign content would allow active attributes such as
+      // xlink:href to bypass the HTML URL policy.
+      if (isForeignNamespace(element) || isDangerousTagNormalized(tagName)) {
+        element.parentNode?.removeChild(element)
+        continue
+      }
+
+      if (!policy.allowedTags.has(tagName)) {
+        if (config.stripTags || config.keepTextContent) {
+          stack.push({
+            child: element.firstChild,
+            depth: frame.depth + 1,
+            destination: frame.destination,
+          })
+        } else {
+          // The denied subtree is omitted from the output.
+        }
         continue
       }
 
       if (hooks?.onElement) {
         const hookResult = hooks.onElement(element)
         if (hookResult === false) {
-          node.removeChild(element)
-          child = next
           continue
         }
       }
 
       sanitizeAttributes(element, tagName, policy, hooks)
-      sanitizeNode(element, policy, hooks)
-
-      // stripTags applies to allowed elements as well as unknown wrappers.
       if (config.stripTags) {
-        unwrapElement(element)
+        stack.push({
+          child: element.firstChild,
+          depth: frame.depth + 1,
+          destination: frame.destination,
+        })
+      } else {
+        const retainedElement = element.cloneNode(false) as Element
+        frame.destination.appendChild(retainedElement)
+        stack.push({
+          child: element.firstChild,
+          depth: frame.depth + 1,
+          destination: retainedElement,
+        })
       }
     } else if (child.nodeType === TEXT_NODE) {
-      // Text nodes are safe.
-    } else if (child.nodeType === COMMENT_NODE) {
-      node.removeChild(child)
+      frame.destination.appendChild(child.cloneNode(false))
     } else {
-      node.removeChild(child)
+      // Comments and all non-text, non-element nodes are omitted.
     }
-
-    child = next
-  }
-}
-
-/**
- * Move an element's sanitized children into its parent, then remove the
- * element itself.
- */
-function unwrapElement(element: Element): void {
-  const parent = element.parentNode
-  if (!parent) {
-    return
   }
 
-  while (element.firstChild) {
-    parent.insertBefore(element.firstChild, element)
-  }
-  parent.removeChild(element)
+  return output
 }
 
 /**
@@ -335,23 +923,40 @@ function stabilizeMXSS(
   fragment: DocumentFragment,
   policy: SanitizationPolicy,
   runtime: DOMRuntime
-): DocumentFragment {
+): StabilizedMXSS {
   let serialized = serializeHTML(fragment)
 
   for (let pass = 0; pass < MAX_MXSS_STABILIZATION_PASSES; pass++) {
-    const reparsed = parseHTMLWithRuntime(serialized, runtime)
-    sanitizeNode(reparsed, policy)
-    sanitizeMXSS(reparsed, true)
+    let reparsed: DocumentFragment
+    try {
+      reparsed = parseHTMLWithRuntime(serialized, runtime)
+    } catch {
+      return {
+        fragment: runtime.document.createDocumentFragment(),
+        serialized: '',
+      }
+    }
+    const sanitized = sanitizeNode(reparsed, policy, undefined, runtime.document)
+    if (!sanitized) {
+      return {
+        fragment: runtime.document.createDocumentFragment(),
+        serialized: '',
+      }
+    }
+    sanitizeMXSS(sanitized, true)
 
-    const nextSerialized = serializeHTML(reparsed)
+    const nextSerialized = serializeHTML(sanitized)
     if (nextSerialized === serialized) {
-      return reparsed
+      return { fragment: sanitized, serialized: nextSerialized }
     }
 
     serialized = nextSerialized
   }
 
-  return runtime.document.createDocumentFragment()
+  return {
+    fragment: runtime.document.createDocumentFragment(),
+    serialized: '',
+  }
 }
 
 function isDocumentFragment(value: unknown): value is DocumentFragment {

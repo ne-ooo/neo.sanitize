@@ -120,9 +120,9 @@ describe('DOM Clobbering Prevention', () => {
       expect(result.reason).toContain('DOM clobbering')
     })
 
-    it('should allow safe id attributes', () => {
+    it('should block arbitrary id attributes when prevention is enabled', () => {
       const result = validateDomClobbering('div', 'id', 'my-button', false)
-      expect(result.allowed).toBe(true)
+      expect(result.allowed).toBe(false)
     })
 
     it('should allow when allowDomClobbering is true', () => {
@@ -286,26 +286,37 @@ describe('DOM Clobbering Prevention', () => {
     })
   })
 
-  describe('Safe id/name attributes', () => {
-    it('should allow safe user-defined ids', () => {
+  describe('Arbitrary id/name attributes', () => {
+    it('should remove arbitrary user-defined ids', () => {
       const html = '<div id="my-button">Content</div>'
       const result = sanitize(html, { preventDOMClobbering: true, allowIdAttribute: true })
-      expect(result).toBe('<div id="my-button">Content</div>')
+      expect(result).toBe('<div>Content</div>')
     })
 
-    it('should allow safe user-defined names (when name is allowed)', () => {
+    it('should remove arbitrary user-defined names when name is allowed', () => {
       const html = '<a href="#" name="user-link">Link</a>'
       const result = sanitize(html, {
         preventDOMClobbering: true,
         allowedAttributes: { a: ['href', 'title', 'name'] }  // explicitly allow name
       })
-      expect(result).toBe('<a href="#" name="user-link">Link</a>')
+      expect(result).toBe('<a href="#">Link</a>')
     })
 
-    it('should allow multiple safe attributes', () => {
+    it('should preserve non-naming attributes', () => {
       const html = '<a href="#" id="header-nav" title="Navigation">Nav</a>'
       const result = sanitize(html, { preventDOMClobbering: true, allowIdAttribute: true })
-      expect(result).toBe('<a href="#" id="header-nav" title="Navigation">Nav</a>')
+      expect(result).toBe('<a href="#" title="Navigation">Nav</a>')
+    })
+
+    it('should remove duplicate id/name clobbering chains', () => {
+      const html = '<a id="redirectTo"></a><a href="/safe" name="redirectTo">Safe</a>'
+      const result = sanitize(html, {
+        preventDOMClobbering: true,
+        allowIdAttribute: true,
+        allowedAttributes: { a: ['href', 'name'] },
+      })
+
+      expect(result).toBe('<a></a><a href="/safe">Safe</a>')
     })
   })
 

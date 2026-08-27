@@ -23,7 +23,14 @@
  */
 
 // Main sanitization functions
-export { sanitize, createSanitizer, sanitizeBasic, sanitizeRelaxed, sanitizeStrict } from './core/sanitizer.js'
+export {
+  sanitize,
+  compileSanitizeOptions,
+  createSanitizer,
+  sanitizeBasic,
+  sanitizeRelaxed,
+  sanitizeStrict,
+} from './core/sanitizer.js'
 
 // Parser functions
 export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from './core/parser.js'
@@ -85,6 +92,7 @@ export {
 // TypeScript types
 export type {
   SanitizeOptions,
+  CompiledSanitizeOptions,
   DOMParserLike,
   DOMRuntime,
   SanitizeSchema,

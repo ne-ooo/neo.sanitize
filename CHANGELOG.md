@@ -15,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- Foreign namespaces are now removed for all policies. Custom tag lists cannot retain active SVG or MathML content.
+- DOM-clobbering prevention now removes all `id` and `name` attributes. It no longer relies on a finite list of names.
+- Deep DOM input now fails closed at the sanitizer depth limit instead of exhausting the JavaScript call stack.
+- Input length, raw markup depth, DOM node count, and DOM depth now have fail-closed limits before and after parsing.
+- The raw depth preflight now follows bounded HTML tokenizer states and charges implicit table levels.
+- Ambiguous raw text and CDATA in unsupported foreign content now fail closed before parsing.
+- DOM runtime parser failures now fail closed in the sanitizer and use a normalized error in the public parser API.
+- Public attribute validators no longer read inherited record properties for attacker-controlled tag names.
+- Unknown schema names now throw instead of falling back to a richer default policy.
+- The package allowlist now includes `.lpm/skills` only. Generated LPM state is not included.
 - Active-content tags now stay blocked when a custom `allowedTags` list contains them.
 - The relaxed schema no longer permits arbitrary attributes on `code` and `pre`.
 - URL-list attributes now check the protocol of each URL candidate.
@@ -25,17 +35,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - The `stripTags` option now removes allowed wrappers too.
 - A hook-free pass now checks all hook mutations.
 - Shared policies are deeply frozen. `getConfig()` returns frozen copies.
-- The experimental mXSS mode now removes foreign namespaces.
+- Foreign namespaces stay blocked during experimental mXSS stabilization.
 - The experimental mXSS mode now requires stable output after reparsing.
 
 ### Performance
 
+- Core and mXSS tree traversal now use explicit stacks instead of JavaScript recursion.
+- Denied wrappers are rebuilt into a linear output tree instead of repeatedly moving retained descendants through every ancestor.
+- Hook-free sanitization now rebuilds only the denied subtree. Allowed siblings remain in place.
+- mXSS string output now reuses the serialization from the stable pass.
+- URL-list validation now streams candidates and stops at the first unsafe URL.
+- CSS function validation now uses a single iterative tokenizer instead of rescanning nested argument substrings.
+- Style validation now performs the global CSS scan once.
 - Reusable sanitizers now cache resolved configuration and compiled policy lookups.
+- Added `compileSanitizeOptions()` for hook-free direct calls that reuse options with different runtimes.
 - DOM parser instances are now reused for each runtime.
 - Hook-free traversal now avoids temporary child and attribute arrays.
-- String sanitization now avoids fragment cloning and cross-document adoption.
+- Hook-free trees without wrapper promotion use an in-place string fast path.
 - Scalar URL validation now avoids temporary candidate arrays and result objects.
-- Local paired-build measurements showed approximately 66% to 167% higher throughput across benchmark inputs.
+- Benchmarks now cover scaling, compiled policies, hostile wrappers, nested CSS functions, and large URL lists.
+- CI now checks output parity, scaling ratios, allocation ratios, nested CSS, and URL-list short-circuiting.
 
 ### Changed
 
@@ -43,6 +62,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - The package now includes an LPM lockfile for reproducible CI installs.
 - The development toolchain now uses patched Vitest, Vite, and esbuild versions.
 - Documentation now reports the measured bundle size and current test count.
+- Inline-style guidance now distinguishes XSS/resource filtering from layout isolation.
+- Builds are minified without published source maps, and release checks enforce raw entry and total distribution budgets.
 
 ## [1.0.0] - 2026-03-19
 

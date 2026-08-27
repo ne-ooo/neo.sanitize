@@ -204,7 +204,11 @@ function isAttributeAllowedNormalized(
     return true
   }
 
-  const allowedForTag = policy?.allowedAttributes.get(tagName) ?? allowedAttributes[tagName]
+  const allowedForTag = policy?.allowedAttributes.get(tagName) ?? (
+    Object.prototype.hasOwnProperty.call(allowedAttributes, tagName)
+      ? allowedAttributes[tagName]
+      : undefined
+  )
   if (!allowedForTag) return false
 
   return collectionHas(allowedForTag, attrName)
@@ -430,7 +434,7 @@ export function filterAllowedAttributes(
   allowedAttributes: Readonly<Record<string, readonly string[]>> | Record<string, string[]> = DEFAULT_ALLOWED_ATTRIBUTES,
   options: Partial<SanitizeOptions> = {}
 ): Record<string, string> {
-  const result: Record<string, string> = {}
+  const result = Object.create(null) as Record<string, string>
 
   for (const [attrName, attrValue] of Object.entries(attributes)) {
     const validation = validateAttribute(tagName, attrName, attrValue, allowedAttributes, options)

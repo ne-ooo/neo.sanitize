@@ -3,6 +3,12 @@ import { deepFreeze } from '../utils/object.js'
 
 export type ResolvedSanitizeOptions = Required<Omit<SanitizeOptions, 'hooks'>>
 
+function resolveLimit(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback
+  if (!Number.isFinite(value) || value < 0) return fallback
+  return Math.floor(value)
+}
+
 /**
  * Merge options into a resolved configuration without retaining caller-owned
  * arrays or attribute maps.
@@ -12,7 +18,7 @@ export function mergeOptions(
   options: Partial<SanitizeOptions> = {}
 ): ResolvedSanitizeOptions {
   const allowedAttributes = options.allowedAttributes ?? base.allowedAttributes
-  const clonedAttributes: Record<string, string[]> = {}
+  const clonedAttributes = Object.create(null) as Record<string, string[]>
 
   for (const tagName of Object.keys(allowedAttributes)) {
     const attributes = allowedAttributes[tagName]
@@ -35,6 +41,9 @@ export function mergeOptions(
     lowercaseTags: options.lowercaseTags ?? base.lowercaseTags,
     lowercaseAttributes: options.lowercaseAttributes ?? base.lowercaseAttributes,
     returnString: options.returnString ?? base.returnString,
+    maxInputLength: resolveLimit(options.maxInputLength, base.maxInputLength),
+    maxDOMNodes: resolveLimit(options.maxDOMNodes, base.maxDOMNodes),
+    maxDOMDepth: resolveLimit(options.maxDOMDepth, base.maxDOMDepth),
     preventDOMClobbering: options.preventDOMClobbering ?? base.preventDOMClobbering,
     detectMXSS: options.detectMXSS ?? base.detectMXSS,
     strictCSSValidation: options.strictCSSValidation ?? base.strictCSSValidation,

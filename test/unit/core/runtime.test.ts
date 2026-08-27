@@ -78,4 +78,36 @@ describe('explicit DOM runtime', () => {
     expect(() => sanitize('<p>Safe</p>')).toThrowError(/No DOM runtime is available in Node\.js/)
     expect(() => sanitize('<p>Safe</p>')).toThrowError(/Web Workers must supply/)
   })
+
+  it('fails closed when the DOM runtime parser throws', () => {
+    const runtime = createRuntime()
+    class ThrowingDOMParser {
+      parseFromString(): Document {
+        throw new RangeError('runtime parser exhausted its stack')
+      }
+    }
+
+    expect(
+      sanitize('<p>Safe</p>', {}, {
+        document: runtime.document,
+        DOMParser: ThrowingDOMParser,
+      })
+    ).toBe('')
+  })
+
+  it('normalizes parser errors from the public parser API', () => {
+    const runtime = createRuntime()
+    class ThrowingDOMParser {
+      parseFromString(): Document {
+        throw new RangeError('runtime parser exhausted its stack')
+      }
+    }
+
+    expect(() =>
+      parseHTML('<p>Safe</p>', {
+        document: runtime.document,
+        DOMParser: ThrowingDOMParser,
+      })
+    ).toThrowError(/DOM runtime failed to parse/)
+  })
 })

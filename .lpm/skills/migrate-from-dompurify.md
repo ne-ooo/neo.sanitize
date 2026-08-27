@@ -120,7 +120,7 @@ sanitize(html, {
   allowIdAttribute: true,
   allowStyleAttribute: true,
   strictCSSValidation: true,  // Validate style content
-  preventDOMClobbering: true, // Validate id/name values
+  preventDOMClobbering: true, // Remove id/name attributes
 })
 ```
 
@@ -134,8 +134,8 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => { ... })
 // After — neo.sanitize hooks (per-call, not global)
 sanitize(html, {
   hooks: {
-    beforeSanitize: (fragment) => { ... },
-    onElement: (element, tagName) => { ... },
+    beforeSanitize: (htmlString) => { ... },
+    onElement: (element) => { const tagName = element.localName; ... },
     onAttribute: (element, attrName, attrValue) => { ... },
     afterSanitize: (fragment) => { ... },
   }
@@ -232,21 +232,17 @@ sanitizeHtml(html, {
 sanitize(html, { allowedProtocols: ['http', 'https'] })
 ```
 
-**2. No `transformTags`:**
+**2. No direct `transformTags` equivalent:**
 ```typescript
 // sanitize-html — transform tags
 sanitizeHtml(html, {
   transformTags: { b: 'strong', i: 'em' }
 })
 
-// neo.sanitize — use onElement hook
-sanitize(html, {
-  hooks: {
-    onElement: (element, tagName) => {
-      // Transform in hook
-    }
-  }
-})
+// Transform with the application's HTML pipeline first, then sanitize the
+// transformed HTML. onElement is a filter/mutation hook, not a tag-name
+// transformation callback.
+sanitize(transformHtml(html))
 ```
 
 **3. Presets (neo.sanitize exclusive):**

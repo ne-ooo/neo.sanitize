@@ -46,16 +46,56 @@ function assertSkillVersionsMatch() {
   }
 }
 
+function assertPublishedLPMFilesAreScoped() {
+  assert.ok(
+    manifest.files.includes('.lpm/skills'),
+    'package.json files must include .lpm/skills'
+  )
+  assert.ok(
+    !manifest.files.includes('.lpm'),
+    'package.json files must not publish generated .lpm state'
+  )
+}
+
 function assertBundleBudget() {
   const esmEntry = readFileSync(resolvePackagePath(manifest.module))
   const compressedBytes = gzipSync(esmEntry, { level: 9 }).byteLength
-  const maximumBytes = 15 * 1024
+  const maximumCompressedBytes = 15 * 1024
+  const maximumRawBytes = 34 * 1024
+  const distributionBytes = getDirectorySize(resolve(packageRoot, 'dist'))
+  const maximumDistributionBytes = 350 * 1024
 
   assert.ok(
-    compressedBytes <= maximumBytes,
-    `The gzipped ESM entry is ${compressedBytes} bytes. The limit is ${maximumBytes} bytes.`
+    compressedBytes <= maximumCompressedBytes,
+    `The gzipped ESM entry is ${compressedBytes} bytes. The limit is ${maximumCompressedBytes} bytes.`
   )
-  return compressedBytes
+  assert.ok(
+    esmEntry.byteLength <= maximumRawBytes,
+    `The raw ESM entry is ${esmEntry.byteLength} bytes. The limit is ${maximumRawBytes} bytes.`
+  )
+  assert.ok(
+    distributionBytes <= maximumDistributionBytes,
+    `The dist directory is ${distributionBytes} bytes. The limit is ${maximumDistributionBytes} bytes.`
+  )
+
+  return {
+    compressedBytes,
+    rawBytes: esmEntry.byteLength,
+    distributionBytes,
+  }
+}
+
+function getDirectorySize(directory) {
+  let bytes = 0
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = resolve(directory, entry.name)
+    bytes += entry.isDirectory()
+      ? getDirectorySize(entryPath)
+      : readFileSync(entryPath).byteLength
+  }
+
+  return bytes
 }
 
 function createRuntime() {
@@ -74,6 +114,7 @@ function assertSanitizer(module, runtime) {
 assert.equal(Object.keys(manifest.dependencies ?? {}).length, 0, 'Runtime dependencies are not allowed')
 assertPublishedFilesExist()
 assertSkillVersionsMatch()
+assertPublishedLPMFilesAreScoped()
 
 const [esmRoot, esmCore, esmValidators, esmSchemas] = await Promise.all([
   import(manifest.name),
@@ -96,5 +137,9 @@ assert.equal(cjsValidators.isDangerousProtocol('javascript'), true)
 assert.deepEqual(esmSchemas.STRICT_SCHEMA.allowedTags, [])
 assert.deepEqual(cjsSchemas.STRICT_SCHEMA.allowedTags, [])
 
-const compressedBytes = assertBundleBudget()
-console.log(`Package verification passed. Gzipped ESM entry: ${compressedBytes} bytes.`)
+const bundle = assertBundleBudget()
+console.log(
+  'Package verification passed. ' +
+    `ESM entry: ${bundle.rawBytes} bytes raw, ${bundle.compressedBytes} bytes gzip. ` +
+    `Dist: ${bundle.distributionBytes} bytes.`
+)

@@ -106,7 +106,28 @@ export interface SanitizeOptions {
   returnString?: boolean
 
   /**
-   * Enable DOM clobbering prevention (Phase 2)
+   * Maximum number of UTF-16 code units accepted after beforeSanitize runs.
+   * Inputs above the limit fail closed before DOM parsing.
+   * @default 200000
+   */
+  maxInputLength?: number
+
+  /**
+   * Maximum number of DOM nodes visited during one sanitization pass.
+   * Inputs above the limit fail closed.
+   * @default 100000
+   */
+  maxDOMNodes?: number
+
+  /**
+   * Maximum input DOM depth accepted by the sanitizer.
+   * Inputs above the limit fail closed.
+   * @default 1024
+   */
+  maxDOMDepth?: number
+
+  /**
+   * Remove all id and name attributes to prevent DOM clobbering.
    * @default false
    */
   preventDOMClobbering?: boolean
@@ -114,15 +135,15 @@ export interface SanitizeOptions {
   /**
    * Enable experimental mXSS defenses.
    *
-   * This option removes foreign namespaces and checks parse stability.
+   * Foreign namespaces are always removed. This option checks parse stability.
    * Its behavior can change before the next major release.
    * @default false
    */
   detectMXSS?: boolean
 
   /**
-   * Enable strict CSS validation (Phase 2)
-   * Only allows whitelisted CSS properties when true
+   * Enable XSS/resource-focused strict CSS validation.
+   * Only allows listed CSS properties when true. This does not isolate layout.
    * @default false
    */
   strictCSSValidation?: boolean
@@ -133,6 +154,9 @@ export interface SanitizeOptions {
    */
   hooks?: SanitizeHooks
 }
+
+/** Frozen options that reuse a compiled sanitizer policy across calls. */
+export type CompiledSanitizeOptions = Readonly<Required<Omit<SanitizeOptions, 'hooks'>>>
 
 /**
  * Predefined sanitization schema

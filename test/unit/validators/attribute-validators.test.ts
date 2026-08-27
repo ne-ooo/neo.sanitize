@@ -167,6 +167,12 @@ describe('isForbiddenAttribute', () => {
 })
 
 describe('isAttributeAllowed', () => {
+  it('does not read inherited properties for attacker-controlled tag names', () => {
+    expect(isAttributeAllowed('constructor', 'href')).toBe(false)
+    expect(isAttributeAllowed('toString', 'href')).toBe(false)
+    expect(isAttributeAllowed('__proto__', 'href')).toBe(false)
+  })
+
   it('allows href on <a> tag', () => {
     expect(isAttributeAllowed('a', 'href')).toBe(true)
   })
@@ -233,6 +239,11 @@ describe('isAttributeAllowed', () => {
 })
 
 describe('validateAttribute', () => {
+  it('fails closed for prototype-collision tag names', () => {
+    expect(validateAttribute('constructor', 'href', 'https://safe.test').allowed).toBe(false)
+    expect(validateAttribute('__proto__', 'href', 'https://safe.test').allowed).toBe(false)
+  })
+
   it('allows safe href on <a> tag', () => {
     const result = validateAttribute('a', 'href', 'https://example.com')
     expect(result.allowed).toBe(true)
@@ -289,6 +300,12 @@ describe('validateAttribute', () => {
 })
 
 describe('filterAllowedAttributes', () => {
+  it('returns an empty null-prototype record for prototype-collision tags', () => {
+    const result = filterAllowedAttributes('toString', { href: 'https://safe.test' })
+    expect(Object.getPrototypeOf(result)).toBeNull()
+    expect(Object.keys(result)).toHaveLength(0)
+  })
+
   it('keeps only allowed attributes for tag', () => {
     const attrs = { href: 'https://example.com', onclick: 'alert(1)', title: 'Hello' }
     const result = filterAllowedAttributes('a', attrs)

@@ -398,6 +398,34 @@ describe('Hooks System', () => {
 
       expect(result).toBe('<a>Link</a>')
     })
+
+    it('removes foreign namespace content added by a hook', () => {
+      const result = sanitize('<p>Safe</p>', {
+        allowedTags: ['p', 'svg', 'a'],
+        allowAllAttributes: ['a'],
+        hooks: {
+          afterSanitize(fragment) {
+            const svg = document.createElementNS(
+              'http://www.w3.org/2000/svg',
+              'svg'
+            )
+            const link = document.createElementNS(
+              'http://www.w3.org/2000/svg',
+              'a'
+            )
+            link.setAttributeNS(
+              'http://www.w3.org/1999/xlink',
+              'xlink:href',
+              'javascript:alert(1)'
+            )
+            svg.appendChild(link)
+            fragment.appendChild(svg)
+          },
+        },
+      })
+
+      expect(result).toBe('<p>Safe</p>')
+    })
   })
 
   describe('hook mutation revalidation', () => {

@@ -186,7 +186,10 @@ export function getSchema(schemaName: 'BASIC' | 'RELAXED' | 'STRICT'): Required<
     case 'STRICT':
       return STRICT_SCHEMA
     default:
-      return DEFAULT_OPTIONS
+      throw new RangeError(
+        `@lpm.dev/neo.sanitize: Unknown schema "${String(schemaName)}". ` +
+          'Expected BASIC, RELAXED, or STRICT.'
+      )
   }
 }
 
