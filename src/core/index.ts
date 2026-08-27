@@ -4,6 +4,13 @@
  * Core sanitization and parsing functionality.
  */
 
-export { sanitize, createSanitizer, sanitizeBasic, sanitizeRelaxed, sanitizeStrict } from './sanitizer.js'
+export {
+  sanitize,
+  compileSanitizeOptions,
+  createSanitizer,
+  sanitizeBasic,
+  sanitizeRelaxed,
+  sanitizeStrict,
+} from './sanitizer.js'
 export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from './parser.js'
-export type { DOMParserLike, DOMRuntime } from '../types.js'
+export type { CompiledSanitizeOptions, DOMParserLike, DOMRuntime } from '../types.js'

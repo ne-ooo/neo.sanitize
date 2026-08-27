@@ -38,33 +38,28 @@ Web Workers must also supply a compatible runtime. Use `document` and `DOMParser
 
 Source: `src/core/parser.ts`
 
-### [HIGH] Use strict CSS validation for untrusted styles
+### [HIGH] Leave inline styles disabled for untrusted content
 
 Wrong:
 
 ```typescript
-// Non-strict mode permits remote HTTP and HTTPS CSS URLs.
-sanitize('<div style="background: url(https://tracker.test/pixel)">Hello</div>', {
+// Strict mode blocks CSS script/resource vectors, but it does not isolate layout.
+sanitize('<div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2147483647">Sign in</div>', {
   allowStyleAttribute: true,
+  strictCSSValidation: true,
 })
-// The remote URL remains.
+// The overlay-capable properties remain.
 ```
 
 Correct:
 
 ```typescript
-// Use strict mode for untrusted styles.
-sanitize('<div style="color: red; font-size: 14px">Hello</div>', {
-  allowStyleAttribute: true,
-  strictCSSValidation: true,
-})
-// Strict mode allows listed properties only.
-// Strict mode removes URL and dynamic functions.
-
-// If inline styles are not necessary, keep allowStyleAttribute false.
+sanitize(userHtml)
+// allowStyleAttribute remains false. If the product must retain author styles,
+// put untrusted content in a separate presentation surface.
 ```
 
-Both modes remove `expression()`, `@import`, dangerous URL protocols, and forbidden properties. Non-strict mode permits safe remote URLs and other properties.
+Both CSS modes remove `expression()`, `@import`, dangerous URL protocols, and forbidden properties. Strict mode also removes URL and dynamic functions, but neither mode prevents UI redressing by itself.
 
 Source: `src/validators/css.ts`
 
@@ -119,17 +114,15 @@ sanitize(userHtml, {
   allowIdAttribute: true,
   preventDOMClobbering: true,
 })
-// Blocks 100+ dangerous id/name values:
-// createElement, getElementById, document, window, location,
-// fetch, localStorage, React, Vue, Angular, $, etc.
+// Removes all id and name attributes.
 
 // Better: avoid allowing id attributes on user content entirely
 sanitize(userHtml)  // allowIdAttribute: false (default)
 ```
 
-DOM clobbering allows attackers to shadow browser globals by setting `id` or `name` attributes to values like `document`, `location`, or `fetch`. The `preventDOMClobbering` option validates against 100+ dangerous property names.
+DOM clobbering lets attackers create browser globals with `id` or `name` attributes. The `preventDOMClobbering` option removes both attributes.
 
-Source: `src/validators/dom-clobbering.ts` — DANGEROUS_IDS list
+Source: `src/validators/dom-clobbering.ts` — `validateDomClobbering`
 
 ### [HIGH] Dangerous tags (script, style, iframe) NEVER preserve text content
 
@@ -172,7 +165,7 @@ Source: `src/core/sanitizer.ts` — dangerous tags skip keepTextContent
 Wrong:
 
 ```typescript
-// This mode removes all foreign namespaces.
+// The sanitizer always removes all foreign namespaces.
 sanitize(userSvg, {
   allowedTags: ['svg', 'circle'],
   detectMXSS: true,
@@ -186,7 +179,7 @@ Correct:
 sanitize(userHtml, { detectMXSS: true })
 ```
 
-The mode removes SVG, MathML, and other foreign namespaces. If three parse passes do not become stable, it returns empty output.
+The sanitizer always removes foreign namespaces. If three parse passes do not produce stable output, this mode returns empty output.
 
 Source: `src/core/sanitizer.ts` and `src/validators/mxss.ts`
 

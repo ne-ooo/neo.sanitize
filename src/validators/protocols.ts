@@ -24,54 +24,56 @@ function isASCIIWhitespace(character: string): boolean {
   return character === ' ' || character === '\t' || character === '\n' || character === '\f' || character === '\r'
 }
 
-/**
- * Extract each URL candidate from an HTML URL attribute.
- *
- * srcset/imagesrcset use comma-separated image candidates whose first token
- * is the URL. data: candidates are forbidden by protocol policy, so treating
- * their comma as a boundary is deliberately fail-closed.
- */
-function getURLCandidates(normalizedName: string, value: string): string[] {
-  if (normalizedName === 'srcset' || normalizedName === 'imagesrcset') {
-    const candidates: string[] = []
+function isSafeCommaSeparatedURLList(
+  value: string,
+  allowedProtocols: ProtocolCollection
+): boolean {
+  let candidateStart = 0
+  let foundCandidate = false
 
-    for (const candidate of value.split(',')) {
-      const trimmed = candidate.trim()
-      if (!trimmed) continue
+  for (let index = 0; index <= value.length; index++) {
+    if (index < value.length && value[index] !== ',') continue
 
-      let end = 0
-      while (end < trimmed.length && !isASCIIWhitespace(trimmed[end] ?? '')) {
-        end++
-      }
+    const candidate = value.slice(candidateStart, index).trim()
+    candidateStart = index + 1
+    if (!candidate) continue
 
-      const url = trimmed.slice(0, end)
-      if (url) candidates.push(url)
+    foundCandidate = true
+    let urlEnd = 0
+    while (
+      urlEnd < candidate.length &&
+      !isASCIIWhitespace(candidate[urlEnd] ?? '')
+    ) {
+      urlEnd++
     }
 
-    return candidates
+    if (!isSafeURL(candidate.slice(0, urlEnd), allowedProtocols)) return false
   }
 
-  if (normalizedName === 'ping' || normalizedName === 'attributionsrc') {
-    const candidates: string[] = []
-    let start = -1
+  return foundCandidate || value.trim() === ''
+}
 
-    for (let index = 0; index <= value.length; index++) {
-      const character = value[index]
-      if (character !== undefined && !isASCIIWhitespace(character)) {
-        if (start === -1) start = index
-        continue
-      }
+function isSafeWhitespaceSeparatedURLList(
+  value: string,
+  allowedProtocols: ProtocolCollection
+): boolean {
+  let candidateStart = -1
+  let foundCandidate = false
 
-      if (start !== -1) {
-        candidates.push(value.slice(start, index))
-        start = -1
-      }
+  for (let index = 0; index <= value.length; index++) {
+    const character = value[index]
+    if (character !== undefined && !isASCIIWhitespace(character)) {
+      if (candidateStart === -1) candidateStart = index
+      continue
     }
 
-    return candidates
+    if (candidateStart === -1) continue
+    foundCandidate = true
+    if (!isSafeURL(value.slice(candidateStart, index), allowedProtocols)) return false
+    candidateStart = -1
   }
 
-  return [value]
+  return foundCandidate || value.trim() === ''
 }
 
 /**
@@ -97,26 +99,15 @@ export function isSafeURLAttributeValueNormalized(
   value: string,
   allowedProtocols: ProtocolCollection = ALLOWED_PROTOCOLS
 ): boolean {
-  const isURLList =
-    normalizedName === 'srcset' ||
-    normalizedName === 'imagesrcset' ||
-    normalizedName === 'ping' ||
-    normalizedName === 'attributionsrc'
-
-  if (!isURLList) {
-    return isSafeURL(value, allowedProtocols)
+  if (normalizedName === 'srcset' || normalizedName === 'imagesrcset') {
+    return isSafeCommaSeparatedURLList(value, allowedProtocols)
   }
 
-  const candidates = getURLCandidates(normalizedName, value)
-
-  // Empty list-valued attributes do not initiate a request.
-  if (candidates.length === 0) return value.trim() === ''
-
-  for (const candidate of candidates) {
-    if (!isSafeURL(candidate, allowedProtocols)) return false
+  if (normalizedName === 'ping' || normalizedName === 'attributionsrc') {
+    return isSafeWhitespaceSeparatedURLList(value, allowedProtocols)
   }
 
-  return true
+  return isSafeURL(value, allowedProtocols)
 }
 
 /**

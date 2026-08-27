@@ -163,6 +163,11 @@ describe('getSchema', () => {
     const schema = getSchema('STRICT')
     expect(schema).toBe(STRICT_SCHEMA)
   })
+
+  it('throws for unknown schema names instead of failing open', () => {
+    expect(() => getSchema('strict' as 'STRICT')).toThrowError(/Unknown schema/)
+    expect(() => getSchema('' as 'STRICT')).toThrowError(/Unknown schema/)
+  })
 })
 
 describe('mergeSchema', () => {

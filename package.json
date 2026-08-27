@@ -32,7 +32,7 @@
   },
   "files": [
     "dist",
-    ".lpm",
+    ".lpm/skills",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",
@@ -44,6 +44,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:package": "node scripts/verify-package.mjs",
+    "test:performance": "node --expose-gc scripts/verify-performance.mjs",
     "test:watch": "vitest",
     "bench": "vitest bench",
     "typecheck": "tsc --noEmit",

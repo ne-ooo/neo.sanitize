@@ -50,9 +50,12 @@ export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = deepFre
   lowercaseTags: true, // Normalize tag names to lowercase
   lowercaseAttributes: true, // Normalize attribute names to lowercase
   returnString: true, // Return sanitized HTML as string (not DocumentFragment)
+  maxInputLength: 200_000, // Bound work before the DOM runtime parses input
+  maxDOMNodes: 100_000, // Bound traversal and mutation work after parsing
+  maxDOMDepth: 1_024, // Bound nested DOM traversal and serializer depth
 
   // Advanced security (Phase 2)
-  preventDOMClobbering: false, // Phase 2 feature
+  preventDOMClobbering: false, // Remove all id/name attributes when enabled
   detectMXSS: false, // Experimental feature
-  strictCSSValidation: false, // Phase 2 feature
+  strictCSSValidation: false, // XSS/resource property allowlist; not layout isolation
 })

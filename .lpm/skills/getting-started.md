@@ -134,6 +134,8 @@ sanitize(userHtml, {}, runtime)
 
 Pass the runtime as the second argument to `createSanitizer`. The `document` and `DOMParser` must use the same DOM implementation.
 
+Use `compileSanitizeOptions()` when direct `sanitize()` calls share options but use different runtime arguments. The function returns frozen options and compiles the policy sets once. It does not accept hooks.
+
 Pass the runtime as the second argument to a preset helper. Pass it to `parseHTML` as the second argument.
 
 ## What Gets Blocked
@@ -228,8 +230,7 @@ sanitize('<p>Hello <b>World</b></p>', { stripTags: true })
 
 ```typescript
 sanitize(html, { preventDOMClobbering: true })
-// Blocks id/name attributes that could shadow global DOM properties
-// e.g., <form id="createElement"> would be blocked
+// Removes all id and name attributes.
 ```
 
 ### CSS Injection Protection
@@ -239,20 +240,21 @@ sanitize(html, {
   allowStyleAttribute: true,
   strictCSSValidation: true,
 })
-// Allows style="" but blocks:
+// For trusted layout markup, allows style="" but blocks:
 // - expression() (IE)
 // - @import
 // - url(javascript:)
 // - url(data:)
 // - all url() and dynamic functions in strict mode
-// Only allows 70+ safe CSS properties (color, font-size, margin, etc.)
+// Only allows listed CSS properties. This is XSS/resource filtering, not
+// layout isolation. Keep styles disabled for untrusted content.
 ```
 
 ### Experimental mXSS Defense
 
 ```typescript
 sanitize(html, { detectMXSS: true })
-// Removes foreign namespaces, including SVG and MathML.
+// SVG, MathML, and other foreign namespaces are always removed.
 // Sanitizes each reparsed result without hooks.
 // Returns empty output if three passes do not produce stable serialization.
 ```
@@ -278,8 +280,8 @@ sanitize(html, config)
 ```typescript
 sanitize(html, {
   hooks: {
-    beforeSanitize: (fragment) => { /* inspect/modify before */ },
-    onElement: (element, tagName) => { /* per-element hook */ },
+    beforeSanitize: (htmlString) => { /* inspect/replace the input string */ },
+    onElement: (element) => { /* use element.localName for the tag name */ },
     onAttribute: (element, attrName, attrValue) => { /* per-attribute hook */ },
     afterSanitize: (fragment) => { /* inspect/modify after */ },
   }
@@ -287,6 +289,10 @@ sanitize(html, {
 ```
 
 The sanitizer calls each hook once. After `afterSanitize`, a hook-free pass checks all current nodes and attributes.
+
+The default limits are 200,000 input code units, 100,000 DOM nodes per pass, and 1,024 source DOM levels.
+
+If the application needs a smaller boundary, configure `maxInputLength`, `maxDOMNodes`, and `maxDOMDepth`.
 
 ## Validator Utilities
 

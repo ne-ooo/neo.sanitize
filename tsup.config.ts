@@ -9,11 +9,11 @@ export default defineConfig({
   },
   format: ['esm', 'cjs'],
   dts: true,
-  sourcemap: true,
+  sourcemap: false,
   clean: true,
   splitting: false,
   treeshake: true,
-  minify: false,
+  minify: true,
   target: 'es2022',
   outDir: 'dist',
 })

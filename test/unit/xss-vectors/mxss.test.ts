@@ -20,6 +20,7 @@ import {
   isForbiddenNesting,
   isNamespaceSwitchingTag,
   isDangerousInForeignContext,
+  sanitizeMXSS,
   validateMXSS,
 } from '../../../src/validators/mxss.js'
 import type { DOMRuntime } from '../../../src/types.js'
@@ -172,6 +173,30 @@ describe('Mutation XSS (mXSS) Detection', () => {
       // Text may remain depending on browser correction
       expect(result).toContain('Text')
     })
+
+    it('removes active SVG even when a custom HTML policy allows it', () => {
+      const result = sanitize(
+        '<svg><a xlink:href="javascript:alert(1)">Unsafe</a></svg><p>Safe</p>',
+        {
+          allowedTags: ['svg', 'a', 'p'],
+          allowedAttributes: { a: ['xlink:href'] },
+        }
+      )
+
+      expect(result).toBe('<p>Safe</p>')
+    })
+
+    it('removes foreign content allowed through allowAllAttributes', () => {
+      const result = sanitize(
+        '<svg><a xlink:href="javascript:alert(1)">Unsafe</a></svg><p>Safe</p>',
+        {
+          allowedTags: ['svg', 'a', 'p'],
+          allowAllAttributes: ['a'],
+        }
+      )
+
+      expect(result).toBe('<p>Safe</p>')
+    })
   })
 
   describe('experimental mXSS defenses', () => {
@@ -242,6 +267,37 @@ describe('Mutation XSS (mXSS) Detection', () => {
 
       expect(result).toBe('')
       expect(parseCount).toBe(4)
+    })
+
+    it('walks deeply nested DOM without JavaScript recursion', () => {
+      interface TestNode {
+        nodeType: number
+        tagName?: string
+        namespaceURI?: string
+        firstChild: TestNode | null
+        nextSibling: TestNode | null
+      }
+
+      const root: TestNode = {
+        nodeType: Node.DOCUMENT_FRAGMENT_NODE,
+        firstChild: null,
+        nextSibling: null,
+      }
+      let parent = root
+      for (let index = 0; index < 10_000; index++) {
+        const element: TestNode = {
+          nodeType: Node.ELEMENT_NODE,
+          tagName: 'DIV',
+          namespaceURI: 'http://www.w3.org/1999/xhtml',
+          firstChild: null,
+          nextSibling: null,
+        }
+        parent.firstChild = element
+        parent = element
+      }
+
+      expect(validateMXSS(root as unknown as Node, true)).toEqual({ hasMXSS: false })
+      expect(sanitizeMXSS(root as unknown as Node, true)).toBe(0)
     })
   })
 

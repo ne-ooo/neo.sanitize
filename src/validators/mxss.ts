@@ -222,13 +222,24 @@ export function validateMXSS(
 
   const forbiddenPatterns: Array<{ parent: string; child: string; reason: string }> = []
 
-  // Recursive function to check nesting
-  function checkNode(currentNode: Node, parentTag: string | null = null): void {
-    if (currentNode.nodeType !== ELEMENT_NODE) {
-      return
-    }
+  const stack: Array<{ child: ChildNode | null; parentTag: string | null }> = [
+    { child: node.firstChild, parentTag: null },
+  ]
 
-    const element = currentNode as Element
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]
+    if (!frame) break
+
+    const child = frame.child
+    if (!child) {
+      stack.pop()
+      continue
+    }
+    frame.child = child.nextSibling
+
+    if (child.nodeType !== ELEMENT_NODE) continue
+
+    const element = child as Element
     const tagName = element.tagName.toLowerCase()
 
     if (isForeignNamespace(element)) {
@@ -237,34 +248,21 @@ export function validateMXSS(
         child: tagName,
         reason: `Foreign namespace detected: ${element.namespaceURI ?? tagName}`,
       })
-      return
+      continue
     }
 
-    // Check if parent/child nesting is forbidden
-    if (parentTag) {
-      const nestingCheck = isForbiddenNesting(parentTag, tagName)
+    if (frame.parentTag) {
+      const nestingCheck = isForbiddenNesting(frame.parentTag, tagName)
       if (nestingCheck.forbidden) {
         forbiddenPatterns.push({
-          parent: parentTag,
+          parent: frame.parentTag,
           child: tagName,
           reason: nestingCheck.reason ?? 'Forbidden nesting detected',
         })
       }
     }
 
-    // Check children recursively
-    let child = element.firstChild
-    while (child) {
-      checkNode(child, tagName)
-      child = child.nextSibling
-    }
-  }
-
-  // Start checking from root
-  let child = node.firstChild
-  while (child) {
-    checkNode(child, null)
-    child = child.nextSibling
+    stack.push({ child: element.firstChild, parentTag: tagName })
   }
 
   // Return result
@@ -301,53 +299,44 @@ export function sanitizeMXSS(node: Node, detectMXSS: boolean = false): number {
 
   let removedCount = 0
 
-  // Recursive function to remove forbidden nesting
-  function checkAndRemove(currentNode: Node, parentTag: string | null = null): void {
-    if (currentNode.nodeType !== ELEMENT_NODE) {
-      return
-    }
+  const stack: Array<{ child: ChildNode | null; parentTag: string | null }> = [
+    { child: node.firstChild, parentTag: null },
+  ]
 
-    const element = currentNode as Element
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]
+    if (!frame) break
+
+    const child = frame.child
+    if (!child) {
+      stack.pop()
+      continue
+    }
+    frame.child = child.nextSibling
+
+    if (child.nodeType !== ELEMENT_NODE) continue
+
+    const element = child as Element
     const tagName = element.tagName.toLowerCase()
 
     // Foreign namespaces change HTML parsing rules. Remove the complete
     // subtree even when a custom tag allowlist contains svg or math.
     if (isForeignNamespace(element)) {
-      if (element.parentNode) {
-        element.parentNode.removeChild(element)
-        removedCount++
-      }
-      return
+      element.parentNode?.removeChild(element)
+      removedCount++
+      continue
     }
 
-    // Check if parent/child nesting is forbidden
-    if (parentTag) {
-      const nestingCheck = isForbiddenNesting(parentTag, tagName)
+    if (frame.parentTag) {
+      const nestingCheck = isForbiddenNesting(frame.parentTag, tagName)
       if (nestingCheck.forbidden) {
-        // Remove this forbidden element
-        if (element.parentNode) {
-          element.parentNode.removeChild(element)
-          removedCount++
-          return // Don't check children of removed element
-        }
+        element.parentNode?.removeChild(element)
+        removedCount++
+        continue
       }
     }
 
-    // Check children recursively
-    let child = element.firstChild
-    while (child) {
-      const next = child.nextSibling
-      checkAndRemove(child, tagName)
-      child = next
-    }
-  }
-
-  // Start checking from root
-  let child = node.firstChild
-  while (child) {
-    const next = child.nextSibling
-    checkAndRemove(child, null)
-    child = next
+    stack.push({ child: element.firstChild, parentTag: tagName })
   }
 
   return removedCount

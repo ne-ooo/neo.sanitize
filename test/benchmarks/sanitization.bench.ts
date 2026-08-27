@@ -7,7 +7,12 @@
  */
 
 import { bench, describe } from 'vitest'
-import { createSanitizer, sanitize as neoSanitize } from '../../src/core/sanitizer.js'
+import {
+  compileSanitizeOptions,
+  createSanitizer,
+  sanitize as neoSanitize,
+} from '../../src/core/sanitizer.js'
+import { isSafeURLAttributeValue } from '../../src/validators/protocols.js'
 import DOMPurify from 'dompurify'
 import sanitizeHtml from 'sanitize-html'
 import { JSDOM } from 'jsdom'
@@ -15,7 +20,19 @@ import { JSDOM } from 'jsdom'
 // Setup DOMPurify for Node.js (needs jsdom)
 const window = new JSDOM('').window
 const DOMPurifyInstance = DOMPurify(window as unknown as Window)
-const reusableNeoSanitizer = createSanitizer()
+const CUSTOM_OPTIONS = {
+  allowedTags: ['p', 'strong', 'a'],
+  allowedAttributes: { a: ['href'] },
+  allowedProtocols: ['http', 'https'],
+}
+const reusableCustomSanitizer = createSanitizer(CUSTOM_OPTIONS)
+const compiledCustomOptions = compileSanitizeOptions(CUSTOM_OPTIONS)
+const reusableStyleSanitizer = createSanitizer({
+  allowedTags: ['div'],
+  allowedAttributes: { div: ['style'] },
+  allowStyleAttribute: true,
+  strictCSSValidation: true,
+})
 
 // Test inputs
 const SMALL_HTML = '<p>Hello <strong>world</strong>!</p>'
@@ -79,6 +96,15 @@ function hello() {
 `
 
 const XSS_HTML = '<p>Safe text</p><script>alert("XSS")</script><img src=x onerror="alert(1)"><a href="javascript:alert(2)">Click</a>'
+const deniedWrapperHTML = (depth: number) =>
+  `${'<section>t'.repeat(depth)}${'</section>'.repeat(depth)}`
+const SINGLE_DENIED_WRAPPER_HTML = `${'<span>safe</span>'.repeat(10_000)}<section></section>`
+const NESTED_CSS_HTML = `<div style="width: ${'calc('.repeat(64)}1px${')'.repeat(64)}">x</div>`
+const SAFE_SRCSET = Array.from(
+  { length: 10_000 },
+  (_, index) => `https://img.test/${index}.png 1x`
+).join(',')
+const EARLY_UNSAFE_SRCSET = `javascript:alert(1),${SAFE_SRCSET}`
 
 describe('Small HTML (~50 chars)', () => {
   bench('neo.sanitize', () => {
@@ -137,15 +163,21 @@ describe('HTML with XSS vectors', () => {
 })
 
 describe('High-volume (1000 small HTML)', () => {
-  bench('neo.sanitize', () => {
+  bench('neo.sanitize custom options', () => {
     for (let i = 0; i < 1000; i++) {
-      neoSanitize(SMALL_HTML)
+      neoSanitize(SMALL_HTML, CUSTOM_OPTIONS)
     }
   })
 
-  bench('neo.sanitize reusable', () => {
+  bench('neo.sanitize reusable custom policy', () => {
     for (let i = 0; i < 1000; i++) {
-      reusableNeoSanitizer.sanitize(SMALL_HTML)
+      reusableCustomSanitizer.sanitize(SMALL_HTML)
+    }
+  })
+
+  bench('neo.sanitize compiled custom options', () => {
+    for (let i = 0; i < 1000; i++) {
+      neoSanitize(SMALL_HTML, compiledCustomOptions)
     }
   })
 
@@ -159,5 +191,29 @@ describe('High-volume (1000 small HTML)', () => {
     for (let i = 0; i < 1000; i++) {
       sanitizeHtml(SMALL_HTML)
     }
+  })
+})
+
+describe('Adversarial scaling shapes', () => {
+  for (const depth of [100, 200, 400]) {
+    bench(`nested denied wrappers, depth ${depth}`, () => {
+      neoSanitize(deniedWrapperHTML(depth))
+    })
+  }
+
+  bench('one denied wrapper among 10,000 allowed elements', () => {
+    neoSanitize(SINGLE_DENIED_WRAPPER_HTML)
+  })
+
+  bench('depth-64 CSS functions', () => {
+    reusableStyleSanitizer.sanitize(NESTED_CSS_HTML)
+  })
+
+  bench('10,000 safe srcset candidates', () => {
+    isSafeURLAttributeValue('srcset', SAFE_SRCSET)
+  })
+
+  bench('unsafe first srcset candidate short-circuits', () => {
+    isSafeURLAttributeValue('srcset', EARLY_UNSAFE_SRCSET)
   })
 })

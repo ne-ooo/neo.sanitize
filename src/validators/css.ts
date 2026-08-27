@@ -27,10 +27,11 @@ export const FORBIDDEN_CSS_PROPERTIES: readonly string[] = deepFreeze([
 ])
 
 /**
- * Safe CSS properties whitelist (for strict mode)
+ * XSS/resource-focused CSS property whitelist (for strict mode)
  *
- * If provided, ONLY these properties are allowed.
- * Most applications don't need this level of restriction.
+ * If enabled, only these properties are allowed. This list does not provide
+ * layout isolation: properties such as position, dimensions, and z-index can
+ * still be used for UI redressing. Keep styles disabled for untrusted layout.
  */
 export const SAFE_CSS_PROPERTIES: readonly string[] = deepFreeze([
   // Layout
@@ -384,13 +385,13 @@ function isIdentifierCharacter(character: string): boolean {
   )
 }
 
-/** Tokenize CSS functions while respecting strings and balanced parentheses. */
-function getCSSFunctions(input: string, nesting: number = 0): CSSFunctionToken[] {
-  if (nesting > MAX_CSS_NESTING) {
-    return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
-  }
-
+/** Tokenize CSS functions in one pass with an explicit nesting stack. */
+function getCSSFunctions(input: string): CSSFunctionToken[] {
   const functions: CSSFunctionToken[] = []
+  const stack: Array<{
+    token?: CSSFunctionToken
+    argumentStart?: number
+  }> = []
   let index = 0
 
   while (index < input.length) {
@@ -400,6 +401,31 @@ function getCSSFunctions(input: string, nesting: number = 0): CSSFunctionToken[]
       const quote = character
       index++
       while (index < input.length && input[index] !== quote) index++
+      if (index >= input.length) {
+        return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
+      }
+      index++
+      continue
+    }
+
+    if (character === '(') {
+      if (stack.length >= MAX_CSS_NESTING) {
+        return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
+      }
+      stack.push({})
+      index++
+      continue
+    }
+
+    if (character === ')') {
+      const frame = stack.pop()
+      if (!frame) {
+        return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
+      }
+
+      if (frame.token && frame.argumentStart !== undefined) {
+        frame.token.argument = input.slice(frame.argumentStart, index)
+      }
       index++
       continue
     }
@@ -413,45 +439,32 @@ function getCSSFunctions(input: string, nesting: number = 0): CSSFunctionToken[]
     while (index < input.length && isIdentifierCharacter(input[index] ?? '')) index++
     const name = input.slice(nameStart, index).toLowerCase()
 
-    while (index < input.length && isWhitespace(input[index] ?? '')) index++
-    if (input[index] !== '(') continue
+    let openParenthesis = index
+    while (
+      openParenthesis < input.length &&
+      isWhitespace(input[openParenthesis] ?? '')
+    ) {
+      openParenthesis++
+    }
+    if (input[openParenthesis] !== '(') continue
 
-    const argumentStart = ++index
-    let depth = 1
-    let quote: '"' | "'" | null = null
-
-    while (index < input.length && depth > 0) {
-      const nested = input[index] ?? ''
-      if (quote) {
-        if (nested === quote) quote = null
-      } else if (nested === '"' || nested === "'") {
-        quote = nested
-      } else if (nested === '(') {
-        depth++
-      } else if (nested === ')') {
-        depth--
-      }
-      index++
+    if (stack.length >= MAX_CSS_NESTING) {
+      return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
     }
 
-    const argumentEnd = depth === 0 ? index - 1 : input.length
-    const argument = input.slice(argumentStart, argumentEnd)
-    functions.push({ name, argument })
+    const token: CSSFunctionToken = { name, argument: '' }
+    functions.push(token)
     if (functions.length >= MAX_CSS_FUNCTIONS) {
       return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
     }
 
-    if (name !== 'url') {
-      for (const nestedFunction of getCSSFunctions(argument, nesting + 1)) {
-        functions.push(nestedFunction)
-        if (functions.length >= MAX_CSS_FUNCTIONS) {
-          return [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
-        }
-      }
-    }
+    stack.push({ token, argumentStart: openParenthesis + 1 })
+    index = openParenthesis + 1
   }
 
-  return functions
+  return stack.length === 0
+    ? functions
+    : [{ name: INVALID_FUNCTION_TOKEN, argument: '' }]
 }
 
 function hasImportAtRule(input: string): boolean {
@@ -609,8 +622,15 @@ export function isSafeCSSProperty(property: string): boolean {
  * sanitizeCSS('width: expression(alert(1))')  // ''
  */
 export function sanitizeCSS(css: string, strictMode: boolean = false): string {
+  return sanitizeCSSChecked(css, strictMode).sanitized
+}
+
+function sanitizeCSSChecked(
+  css: string,
+  strictMode: boolean
+): { sanitized: string; globalReason?: string } {
   if (!css || typeof css !== 'string') {
-    return ''
+    return { sanitized: '' }
   }
 
   // Check for globally dangerous patterns first (expression, @import)
@@ -618,11 +638,14 @@ export function sanitizeCSS(css: string, strictMode: boolean = false): string {
   const globalCheck = hasGloballyDangerousCSS(css)
   if (globalCheck.dangerous) {
     // Remove entire style if globally dangerous pattern found
-    return ''
+    return {
+      sanitized: '',
+      globalReason: globalCheck.reason ?? 'Dangerous CSS pattern detected',
+    }
   }
 
   const declarations = splitCSSDeclarations(css)
-  if (!declarations) return ''
+  if (!declarations) return { sanitized: '' }
 
   const safeDeclarations: string[] = []
 
@@ -643,7 +666,7 @@ export function sanitizeCSS(css: string, strictMode: boolean = false): string {
     safeDeclarations.push(`${declaration.property}: ${declaration.value}`)
   }
 
-  return safeDeclarations.join('; ')
+  return { sanitized: safeDeclarations.join('; ') }
 }
 
 /**
@@ -681,17 +704,20 @@ export function validateStyleAttribute(
     }
   }
 
-  // Check for globally dangerous CSS patterns (expression, @import)
-  const globalCheck = hasGloballyDangerousCSS(styleValue)
-  if (globalCheck.dangerous) {
+  // Analyze global patterns and declarations once. The public sanitizeCSS()
+  // API delegates to the same fail-closed implementation.
+  const result = sanitizeCSSChecked(
+    styleValue,
+    options.strictCSSValidation ?? false
+  )
+  if (result.globalReason) {
     return {
       allowed: false,
-      reason: globalCheck.reason ?? 'Dangerous CSS pattern detected',
+      reason: result.globalReason,
     }
   }
 
-  // Sanitize CSS
-  const sanitized = sanitizeCSS(styleValue, options.strictCSSValidation ?? false)
+  const sanitized = result.sanitized
 
   if (!sanitized || sanitized.trim() === '') {
     return {

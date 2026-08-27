@@ -1,8 +1,10 @@
 /**
  * @lpm.dev/neo.sanitize - DOM Clobbering Prevention
  *
- * Prevents DOM clobbering attacks where HTML elements with id/name
- * attributes override critical DOM properties and JavaScript APIs.
+ * Prevents DOM clobbering attacks by removing attacker-controlled id/name
+ * attributes when prevention is enabled. The known-name helpers remain
+ * available for diagnostics, but a blocklist cannot prevent arbitrary named
+ * globals or multi-element clobbering chains.
  *
  * Example Attack:
  * ```html
@@ -255,23 +257,10 @@ export function validateDomClobbering(
     return { allowed: true }
   }
 
-  // Check if this is a dangerous id
-  if (attrName === 'id' && isDangerousId(attrValue)) {
-    return {
-      allowed: false,
-      reason: `DOM clobbering: id="${attrValue}" could override DOM API`,
-    }
+  return {
+    allowed: false,
+    reason: `DOM clobbering prevention removes ${attrName}="${attrValue}" from <${tagName}>`,
   }
-
-  // Check if this is a dangerous name
-  if (attrName === 'name' && isDangerousName(attrValue, tagName)) {
-    return {
-      allowed: false,
-      reason: `DOM clobbering: name="${attrValue}" could override DOM property`,
-    }
-  }
-
-  return { allowed: true }
 }
 
 /**

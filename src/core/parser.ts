@@ -111,7 +111,14 @@ export function parseDocumentWithRuntime(html: string, dom: DOMRuntime): Documen
     PARSER_CACHE.set(dom.DOMParser, parser)
   }
 
-  const parsedDocument = parser.parseFromString(html, 'text/html')
+  let parsedDocument: Document
+  try {
+    parsedDocument = parser.parseFromString(html, 'text/html')
+  } catch (cause) {
+    throw new Error('@lpm.dev/neo.sanitize: The DOM runtime failed to parse the HTML input.', {
+      cause,
+    })
+  }
 
   if (!parsedDocument?.body) {
     throw new TypeError(
