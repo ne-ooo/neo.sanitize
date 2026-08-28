@@ -10,20 +10,42 @@ import type {
   Sanitizer,
 } from '../types.js'
 import { DEFAULT_OPTIONS } from '../config/defaults.js'
-import { mergeOptions, snapshotOptions } from '../config/options.js'
+import { mergeOptions, readOwnOption, snapshotOptions } from '../config/options.js'
 import type { ResolvedSanitizeOptions } from '../config/options.js'
 import { BASIC_SCHEMA, RELAXED_SCHEMA, STRICT_SCHEMA } from '../config/schemas.js'
 import {
   consumeAndSerializeHTML,
   parseDocumentWithRuntime,
-  parseHTMLWithRuntime,
   resolveDOMRuntime,
   serializeHTML,
 } from './parser.js'
-import { isDangerousTagNormalized } from '../validators/tags.js'
+import {
+  isCustomElementNameNormalized,
+  isDangerousTagNormalized,
+} from '../validators/tags.js'
 import { validateAttributeNormalized } from '../validators/attributes.js'
 import type { AttributeValidationPolicy } from '../validators/attributes.js'
 import { isForeignNamespace, sanitizeMXSS } from '../validators/mxss.js'
+import {
+  appendNode,
+  cloneDOMNode,
+  createDocumentFragment,
+  getChildNodes,
+  getDocumentBody,
+  getElementAttributes,
+  getElementLocalName,
+  getFirstChild,
+  getLastChild,
+  getNextSibling,
+  getNodeType,
+  getOwnerDocument,
+  getParentNode,
+  hasElementAttribute,
+  insertBeforeNode,
+  removeElementAttribute,
+  removeNode,
+  setElementAttribute,
+} from '../utils/dom.js'
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
@@ -48,6 +70,12 @@ interface TraversalBudget {
   visitedNodes: number
 }
 
+interface ChildCursor {
+  child: ChildNode | null
+  fallbackChildren: ChildNode[] | undefined
+  fallbackIndex: number
+}
+
 interface StabilizedMXSS {
   fragment: DocumentFragment
   serialized: string
@@ -55,6 +83,38 @@ interface StabilizedMXSS {
 
 const POLICY_CACHE = new WeakMap<ResolvedSanitizeOptions, SanitizationPolicy>()
 const COMPILED_CONFIGS = new WeakSet<object>()
+
+/**
+ * Some DOM shims expose childNodes but return null from nextSibling. Detect
+ * that contract violation once per parent and use a bounded local snapshot.
+ */
+function createChildCursor(parent: Node): ChildCursor {
+  const child = getFirstChild(parent)
+  if (
+    child &&
+    getNextSibling(child) === null &&
+    child !== getLastChild(parent)
+  ) {
+    const childNodes = getChildNodes(parent)
+    return {
+      child,
+      fallbackChildren: Array.from(childNodes),
+      fallbackIndex: 0,
+    }
+  }
+
+  return { child, fallbackChildren: undefined, fallbackIndex: -1 }
+}
+
+function advanceChildCursor(cursor: ChildCursor, child: ChildNode): void {
+  if (cursor.fallbackChildren) {
+    cursor.fallbackIndex++
+    cursor.child = cursor.fallbackChildren[cursor.fallbackIndex] ?? null
+    return
+  }
+
+  cursor.child = getNextSibling(child)
+}
 
 function getPolicy(config: ResolvedSanitizeOptions): SanitizationPolicy {
   const cached = POLICY_CACHE.get(config)
@@ -143,7 +203,24 @@ export function sanitize(
   runtime?: DOMRuntime
 ): string | DocumentFragment {
   const config = resolveOptions(options)
-  return sanitizeWithPolicy(html, getPolicy(config), options.hooks, runtime)
+  return sanitizeWithPolicy(
+    html,
+    getPolicy(config),
+    readOwnOption(options, 'hooks'),
+    runtime
+  )
+}
+
+function isRejectedElement(
+  element: Element,
+  tagName: string,
+  config: ResolvedSanitizeOptions
+): boolean {
+  return (
+    isDangerousTagNormalized(tagName) ||
+    (!config.allowCustomElements &&
+      (isCustomElementNameNormalized(tagName) || hasElementAttribute(element, 'is')))
+  )
 }
 
 function sanitizeWithPolicy(
@@ -159,14 +236,14 @@ function sanitizeWithPolicy(
       return ''
     }
 
-    return resolveDOMRuntime(runtime).document.createDocumentFragment()
+    return createDocumentFragment(resolveDOMRuntime(runtime).document)
   }
 
   let processedHtml = html
   if (processedHtml.length > config.maxInputLength) {
     return config.returnString
       ? ''
-      : resolveDOMRuntime(runtime).document.createDocumentFragment()
+      : createDocumentFragment(resolveDOMRuntime(runtime).document)
   }
 
   if (hooks?.beforeSanitize) {
@@ -181,13 +258,13 @@ function sanitizeWithPolicy(
   if (processedHtml.length > config.maxInputLength) {
     return config.returnString
       ? ''
-      : resolveDOMRuntime(runtime).document.createDocumentFragment()
+      : createDocumentFragment(resolveDOMRuntime(runtime).document)
   }
 
   if (exceedsMarkupDepth(processedHtml, config.maxDOMDepth)) {
     return config.returnString
       ? ''
-      : resolveDOMRuntime(runtime).document.createDocumentFragment()
+      : createDocumentFragment(resolveDOMRuntime(runtime).document)
   }
 
   const dom = resolveDOMRuntime(runtime)
@@ -205,25 +282,28 @@ function sanitizeWithPolicy(
     } catch {
       return ''
     }
-    if (!sanitizeNodeInPlace(parsedDocument.body, policy)) return ''
-    return parsedDocument.body.innerHTML
+    const body = getDocumentBody(parsedDocument) as HTMLBodyElement
+    if (!sanitizeNodeInPlace(body, policy)) return ''
+    return body.innerHTML
   }
 
-  let fragment: DocumentFragment
+  let parsedDocument: Document
   try {
-    fragment = parseHTMLWithRuntime(processedHtml, dom)
+    parsedDocument = parseDocumentWithRuntime(processedHtml, dom)
   } catch {
-    return config.returnString ? '' : dom.document.createDocumentFragment()
+    return config.returnString ? '' : createDocumentFragment(dom.document)
   }
+
+  const body = getDocumentBody(parsedDocument) as HTMLBodyElement
 
   // User hooks run only in this pass.
   const traversalHooks = hooks?.onElement || hooks?.onAttribute ? hooks : undefined
-  const sanitizedFragment = sanitizeNode(fragment, policy, traversalHooks, dom.document)
+  const sanitizedFragment = sanitizeNode(body, policy, traversalHooks, dom.document)
   if (!sanitizedFragment) {
-    return config.returnString ? '' : dom.document.createDocumentFragment()
+    return config.returnString ? '' : createDocumentFragment(dom.document)
   }
 
-  fragment = sanitizedFragment
+  let fragment = sanitizedFragment
 
   if (config.detectMXSS && hooks?.afterSanitize) {
     sanitizeMXSS(fragment, true)
@@ -242,7 +322,7 @@ function sanitizeWithPolicy(
     // pass has no hooks, so every current element and attribute is revalidated.
     const revalidated = sanitizeNode(finalFragment, policy, undefined, dom.document)
     if (!revalidated) {
-      return config.returnString ? '' : dom.document.createDocumentFragment()
+      return config.returnString ? '' : createDocumentFragment(dom.document)
     }
     finalFragment = revalidated
   }
@@ -675,8 +755,8 @@ function sanitizeNodeInPlace(
   budget: TraversalBudget = { visitedNodes: 0 }
 ): boolean {
   const config = policy.config
-  const stack: Array<{ child: ChildNode | null; depth: number }> = [
-    { child: node.firstChild, depth: 1 },
+  const stack: Array<ChildCursor & { depth: number }> = [
+    { ...createChildCursor(node), depth: 1 },
   ]
 
   while (stack.length > 0) {
@@ -688,17 +768,21 @@ function sanitizeNodeInPlace(
       stack.pop()
       continue
     }
-    frame.child = child.nextSibling
+    advanceChildCursor(frame, child)
 
     budget.visitedNodes++
     if (budget.visitedNodes > config.maxDOMNodes) return false
-    if (child.nodeType === ELEMENT_NODE) {
+    const nodeType = getNodeType(child)
+    if (nodeType === ELEMENT_NODE) {
       const element = child as Element
       if (frame.depth > config.maxDOMDepth) return false
 
-      const tagName = element.localName.toLowerCase()
-      if (isForeignNamespace(element) || isDangerousTagNormalized(tagName)) {
-        element.parentNode?.removeChild(element)
+      const tagName = getElementLocalName(element).toLowerCase()
+      if (
+        isForeignNamespace(element, tagName) ||
+        isRejectedElement(element, tagName, config)
+      ) {
+        removeNode(element)
         continue
       }
 
@@ -708,20 +792,20 @@ function sanitizeNodeInPlace(
             element,
             policy,
             undefined,
-            element.ownerDocument,
+            getOwnerDocument(element),
             budget,
             frame.depth + 1
           )
           if (!promoted) return false
 
-          const parent = element.parentNode
+          const parent = getParentNode(element)
           if (parent) {
-            parent.insertBefore(promoted, element)
-            parent.removeChild(element)
+            insertBeforeNode(parent, promoted, element)
+            removeNode(element)
           }
           continue
         }
-        element.parentNode?.removeChild(element)
+        removeNode(element)
         continue
       }
 
@@ -730,23 +814,26 @@ function sanitizeNodeInPlace(
           element,
           policy,
           undefined,
-          element.ownerDocument,
+          getOwnerDocument(element),
           budget,
           frame.depth + 1
         )
         if (!promoted) return false
 
-        const parent = element.parentNode
+        const parent = getParentNode(element)
         if (parent) {
-          parent.insertBefore(promoted, element)
-          parent.removeChild(element)
+          insertBeforeNode(parent, promoted, element)
+          removeNode(element)
         }
         continue
       }
       sanitizeAttributes(element, tagName, policy)
-      stack.push({ child: element.firstChild, depth: frame.depth + 1 })
-    } else if (child.nodeType !== TEXT_NODE) {
-      child.parentNode?.removeChild(child)
+      stack.push({
+        ...createChildCursor(element),
+        depth: frame.depth + 1,
+      })
+    } else if (nodeType !== TEXT_NODE) {
+      removeNode(child)
     }
   }
 
@@ -763,12 +850,17 @@ function buildSanitizedFragment(
   initialDepth = 1
 ): DocumentFragment | null {
   const config = policy.config
-  const output = outputDocument.createDocumentFragment()
-  const stack: Array<{
-    child: ChildNode | null
+  const output = createDocumentFragment(outputDocument)
+  const stack: Array<ChildCursor & {
     depth: number
     destination: Node
-  }> = [{ child: node.firstChild, depth: initialDepth, destination: output }]
+  }> = [
+    {
+      ...createChildCursor(node),
+      depth: initialDepth,
+      destination: output,
+    },
+  ]
 
   while (stack.length > 0) {
     const frame = stack[stack.length - 1]
@@ -784,11 +876,12 @@ function buildSanitizedFragment(
     if (budget.visitedNodes > config.maxDOMNodes) return null
 
     // Capture the next sibling before hooks or removals can mutate the tree.
-    frame.child = child.nextSibling
+    advanceChildCursor(frame, child)
 
-    if (child.nodeType === ELEMENT_NODE) {
+    const nodeType = getNodeType(child)
+    if (nodeType === ELEMENT_NODE) {
       const element = child as Element
-      const tagName = element.localName.toLowerCase()
+      const tagName = getElementLocalName(element).toLowerCase()
 
       // Bound DOM depth before the DOM implementation's own serializer can
       // exhaust the JavaScript stack. Over-limit input fails closed.
@@ -797,15 +890,18 @@ function buildSanitizedFragment(
       // HTML policies are not namespace-aware. Retaining SVG, MathML, or
       // other foreign content would allow active attributes such as
       // xlink:href to bypass the HTML URL policy.
-      if (isForeignNamespace(element) || isDangerousTagNormalized(tagName)) {
-        element.parentNode?.removeChild(element)
+      if (
+        isForeignNamespace(element, tagName) ||
+        isRejectedElement(element, tagName, config)
+      ) {
+        removeNode(element)
         continue
       }
 
       if (!policy.allowedTags.has(tagName)) {
         if (config.stripTags || config.keepTextContent) {
           stack.push({
-            child: element.firstChild,
+            ...createChildCursor(element),
             depth: frame.depth + 1,
             destination: frame.destination,
           })
@@ -825,21 +921,21 @@ function buildSanitizedFragment(
       sanitizeAttributes(element, tagName, policy, hooks)
       if (config.stripTags) {
         stack.push({
-          child: element.firstChild,
+          ...createChildCursor(element),
           depth: frame.depth + 1,
           destination: frame.destination,
         })
       } else {
-        const retainedElement = element.cloneNode(false) as Element
-        frame.destination.appendChild(retainedElement)
+        const retainedElement = cloneDOMNode(element, false)
+        appendNode(frame.destination, retainedElement)
         stack.push({
-          child: element.firstChild,
+          ...createChildCursor(element),
           depth: frame.depth + 1,
           destination: retainedElement,
         })
       }
-    } else if (child.nodeType === TEXT_NODE) {
-      frame.destination.appendChild(child.cloneNode(false))
+    } else if (nodeType === TEXT_NODE) {
+      appendNode(frame.destination, cloneDOMNode(child, false))
     } else {
       // Comments and all non-text, non-element nodes are omitted.
     }
@@ -858,7 +954,7 @@ function sanitizeAttributes(
   hooks?: SanitizeHooks
 ): void {
   if (hooks?.onAttribute) {
-    const attributes = Array.from(element.attributes)
+    const attributes = Array.from(getElementAttributes(element))
     for (const attr of attributes) {
       sanitizeAttribute(element, tagName, attr, policy, hooks)
     }
@@ -866,8 +962,9 @@ function sanitizeAttributes(
   }
 
   let index = 0
-  while (index < element.attributes.length) {
-    const attr = element.attributes.item(index)
+  const attributes = getElementAttributes(element)
+  while (index < attributes.length) {
+    const attr = attributes.item(index)
     if (!attr) break
 
     const removed = sanitizeAttribute(element, tagName, attr, policy)
@@ -889,7 +986,7 @@ function sanitizeAttribute(
   if (hooks?.onAttribute) {
     const hookResult = hooks.onAttribute(element, attrName, attrValue)
     if (hookResult === false) {
-      element.removeAttribute(attr.name)
+      removeElementAttribute(element, attr.name)
       return true
     }
   }
@@ -904,12 +1001,12 @@ function sanitizeAttribute(
   )
 
   if (!validation.allowed) {
-    element.removeAttribute(attr.name)
+    removeElementAttribute(element, attr.name)
     return true
   }
 
   if (validation.sanitizedValue !== undefined) {
-    element.setAttribute(attr.name, validation.sanitizedValue)
+    setElementAttribute(element, attr.name, validation.sanitizedValue)
   }
   return false
 }
@@ -927,19 +1024,20 @@ function stabilizeMXSS(
   let serialized = serializeHTML(fragment)
 
   for (let pass = 0; pass < MAX_MXSS_STABILIZATION_PASSES; pass++) {
-    let reparsed: DocumentFragment
+    let sanitized: DocumentFragment | null
     try {
-      reparsed = parseHTMLWithRuntime(serialized, runtime)
+      const parsedDocument = parseDocumentWithRuntime(serialized, runtime)
+      const body = getDocumentBody(parsedDocument) as HTMLBodyElement
+      sanitized = sanitizeNode(body, policy, undefined, runtime.document)
     } catch {
       return {
-        fragment: runtime.document.createDocumentFragment(),
+        fragment: createDocumentFragment(runtime.document),
         serialized: '',
       }
     }
-    const sanitized = sanitizeNode(reparsed, policy, undefined, runtime.document)
     if (!sanitized) {
       return {
-        fragment: runtime.document.createDocumentFragment(),
+        fragment: createDocumentFragment(runtime.document),
         serialized: '',
       }
     }
@@ -954,7 +1052,7 @@ function stabilizeMXSS(
   }
 
   return {
-    fragment: runtime.document.createDocumentFragment(),
+    fragment: createDocumentFragment(runtime.document),
     serialized: '',
   }
 }
@@ -963,8 +1061,7 @@ function isDocumentFragment(value: unknown): value is DocumentFragment {
   return (
     typeof value === 'object' &&
     value !== null &&
-    (value as Node).nodeType === DOCUMENT_FRAGMENT_NODE &&
-    'childNodes' in value
+    getNodeType(value as Node) === DOCUMENT_FRAGMENT_NODE
   )
 }
 
@@ -976,7 +1073,7 @@ export function createSanitizer(
   runtime?: DOMRuntime
 ): Sanitizer {
   let config = resolveOptions(options)
-  let hooks = options.hooks
+  let hooks = readOwnOption(options, 'hooks')
 
   return {
     sanitize(html: string): string | DocumentFragment {
@@ -990,7 +1087,7 @@ export function createSanitizer(
     updateConfig(newOptions: Partial<SanitizeOptions>): void {
       config = mergeOptions(config, newOptions)
       if (Object.prototype.hasOwnProperty.call(newOptions, 'hooks')) {
-        hooks = newOptions.hooks
+        hooks = readOwnOption(newOptions, 'hooks')
       }
     },
   }

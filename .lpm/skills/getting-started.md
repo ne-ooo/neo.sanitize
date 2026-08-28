@@ -83,10 +83,13 @@ sanitize(html, {
   allowClassAttribute: false,    // class attribute (default: false)
   allowIdAttribute: false,       // id attribute (default: false)
   allowStyleAttribute: false,    // style attribute (default: false)
+  allowCustomElements: false,    // custom elements (default: false)
 })
 ```
 
 The `allowedTags` option cannot enable active-content tags. Tags such as `script`, `style`, `iframe`, and `form` always stay blocked.
+
+The `allowedTags` option cannot enable custom elements by default. Keep `allowCustomElements` disabled for attacker-controlled HTML.
 
 Each URL in `srcset`, `imagesrcset`, `ping`, and `attributionsrc` must have an allowed protocol.
 

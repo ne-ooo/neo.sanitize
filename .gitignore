@@ -3,3 +3,16 @@ dist
 .build
 *.tsbuildinfo
 coverage
+
+# LPM state is generated. Package skills are source files.
+.lpm/*
+!.lpm/skills/
+!.lpm/skills/**
+/test-results/
+/playwright-report/
+
+# LPM wrapper tree (auto-generated)
+.lpm/wrappers/
+
+# LPM hoisted state (auto-generated)
+.lpm/hoisted/

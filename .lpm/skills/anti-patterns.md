@@ -160,6 +160,19 @@ Script and style tag contents are executable/interpretable — preserving their 
 
 Source: `src/core/sanitizer.ts` — dangerous tags skip keepTextContent
 
+### [CRITICAL] Do not enable custom elements for attacker-controlled HTML
+
+```typescript
+sanitize(userHtml, {
+  allowedTags: ['user-card'],
+  allowCustomElements: true,
+})
+```
+
+Custom-element insertion can run application-defined constructors and lifecycle callbacks. Keep `allowCustomElements` disabled for attacker-controlled HTML.
+
+Customized built-ins use the `is` attribute and have the same risk. The sanitizer removes both forms by default.
+
 ### [HIGH] Treat `detectMXSS` as experimental
 
 Wrong:

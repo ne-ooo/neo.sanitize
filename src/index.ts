@@ -52,6 +52,7 @@ export {
   normalizeTagName,
   isTagAllowed,
   isDangerousTag,
+  isCustomElementNameNormalized,
   validateTag,
   filterAllowedTags,
   getDangerousTags,

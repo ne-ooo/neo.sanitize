@@ -74,6 +74,15 @@ export interface SanitizeOptions {
   allowStyleAttribute?: boolean
 
   /**
+   * Allow explicitly listed custom elements and customized built-ins.
+   *
+   * WARNING: Inserting the result can run application-defined custom-element
+   * lifecycle code. Keep this disabled for attacker-controlled HTML.
+   * @default false
+   */
+  allowCustomElements?: boolean
+
+  /**
    * Strip tags instead of removing them entirely
    * Safe child content remains, but dangerous element subtrees are removed.
    * @default false

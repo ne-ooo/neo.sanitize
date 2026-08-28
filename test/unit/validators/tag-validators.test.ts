@@ -3,6 +3,7 @@ import {
   normalizeTagName,
   isTagAllowed,
   isDangerousTag,
+  isCustomElementNameNormalized,
   validateTag,
   filterAllowedTags,
   getDangerousTags,
@@ -30,6 +31,31 @@ describe('normalizeTagName', () => {
   it('returns already-lowercase tags unchanged', () => {
     expect(normalizeTagName('p')).toBe('p')
     expect(normalizeTagName('span')).toBe('span')
+  })
+})
+
+describe('custom elements', () => {
+  it('detects custom-element-like names', () => {
+    expect(isCustomElementNameNormalized('user-card')).toBe(true)
+    expect(isCustomElementNameNormalized('annotation-xml')).toBe(true)
+    expect(isCustomElementNameNormalized('div')).toBe(false)
+  })
+
+  it('rejects custom elements by default even when listed', () => {
+    expect(isTagAllowed('user-card', ['user-card'])).toBe(false)
+    expect(validateTag('user-card', ['user-card'])).toMatchObject({
+      allowed: false,
+      reason: 'Custom element disabled: user-card',
+    })
+  })
+
+  it('requires an explicit opt-in and allowlist entry', () => {
+    expect(isTagAllowed('user-card', ['user-card'], true)).toBe(true)
+    expect(isTagAllowed('other-card', ['user-card'], true)).toBe(false)
+    expect(filterAllowedTags(['user-card', 'p'], ['user-card', 'p'], true)).toEqual([
+      'user-card',
+      'p',
+    ])
   })
 })
 

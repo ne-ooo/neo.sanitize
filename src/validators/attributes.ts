@@ -181,6 +181,10 @@ function isAttributeAllowedNormalized(
   policy: AttributeValidationPolicy | undefined,
   checkForbidden: boolean
 ): boolean {
+  // The `is` attribute upgrades a built-in element and can invoke
+  // application-defined lifecycle code when sanitized output is inserted.
+  if (attrName === 'is' && !options.allowCustomElements) return false
+
   if (
     checkForbidden &&
     isForbiddenAttributeNormalized(

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Added a version-pinned public attack corpus with Apache-2.0 attribution.
+- Added browser-engine, DOM-runtime, parser-context, and property-fuzz checks.
 - Added test coverage gates for statements, branches, functions, and lines.
 - Added package checks for public exports, skill versions, required files, and the bundle budget.
 - Added CI checks for Node.js 18, 20, and 22.
@@ -15,6 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- Custom elements and customized built-ins now require an explicit unsafe opt-in.
+- Inherited and accessor-backed configuration properties can no longer broaden policy.
+- Raw browser nodes remain in the inert parser document until sanitization finishes.
+- DOM named properties can no longer skip traversal or shadow sanitizer operations.
+- Added a published threat model and security invariants.
 - Foreign namespaces are now removed for all policies. Custom tag lists cannot retain active SVG or MathML content.
 - DOM-clobbering prevention now removes all `id` and `name` attributes. It no longer relies on a finite list of names.
 - Deep DOM input now fails closed at the sanitizer depth limit instead of exhausting the JavaScript call stack.
@@ -69,7 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **`sanitize(html, options?)`** — Sanitize HTML strings, blocking 143+ XSS vectors
+- **`sanitize(html, options?)`** — Sanitize HTML strings with a fail-closed HTML policy
 - **`createSanitizer(options)`** — Create a reusable sanitizer with fixed configuration
 - **`BASIC` schema** — Common safe tags: p, br, strong, em, a, ul, ol, li, etc.
 - **`RELAXED` schema** — Extended tags including tables, code blocks, images

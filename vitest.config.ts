@@ -1,11 +1,17 @@
 import { defineConfig } from 'vitest/config'
 
+const nodeMajor = Number(process.versions.node.split('.')[0])
+
 export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
     include: ['test/**/*.test.ts'],
-    exclude: ['test/**/*.bench.ts', 'node_modules'],
+    exclude: [
+      'test/**/*.bench.ts',
+      'node_modules',
+      ...(nodeMajor < 20 ? ['test/runtime-matrix.test.ts'] : []),
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
