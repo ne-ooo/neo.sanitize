@@ -1,6 +1,6 @@
 ---
 name: getting-started
-description: How to use neo.sanitize — sanitize() for XSS-safe HTML, createSanitizer() for reusable instances, preset schemas (sanitizeBasic, sanitizeRelaxed, sanitizeStrict), allowedTags/allowedAttributes/allowedProtocols configuration, data/aria/class/id/style attribute flags, returnString vs DocumentFragment, protocol validation (blocks javascript:/data:/vbscript:), DOM clobbering prevention, CSS injection protection, mXSS detection, hooks, subpath imports, TypeScript types
+description: Use neo.sanitize to remove XSS from untrusted HTML. Covers sanitize(), Trusted Types, reusable sanitizers, schemas, options, protocol and CSS checks, DOM clobbering, mXSS detection, hooks, DOM runtimes, subpath imports, and TypeScript types.
 version: "1.0.0"
 globs:
   - "**/*.ts"
@@ -97,6 +97,29 @@ Each URL in `srcset`, `imagesrcset`, `ping`, and `attributionsrc` must have an a
 Set `insertionContext` when output goes into `table`, `tbody`, `tr`, `select`, or another supported special element. The context must match the receiving element.
 
 Raw-text, script, style, template, and foreign-namespace contexts are not supported.
+
+## Trusted Types
+
+If the browser enforces Trusted Types, use `sanitizeToTrustedHTML()`.
+
+```typescript
+import { sanitizeToTrustedHTML } from '@lpm.dev/neo.sanitize'
+
+const policy = trustedTypes.createPolicy('neo-sanitize', {
+  createHTML(input) {
+    return input
+  },
+})
+
+const clean = sanitizeToTrustedHTML(userHtml, policy)
+target.innerHTML = clean
+```
+
+The policy must be an identity policy. Keep the policy private to this integration.
+
+Do not call the policy directly for a DOM sink. Direct use bypasses sanitization.
+
+For an explicit browser runtime, create the policy in that runtime's realm.
 
 ## createSanitizer — Reusable Instance
 

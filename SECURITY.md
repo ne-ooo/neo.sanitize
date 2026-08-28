@@ -32,7 +32,15 @@ Treat hooks as trusted application code. A hook cannot retain a blocked element,
 
 Use a trusted DOM runtime. The `document` and `DOMParser` values must come from the same implementation.
 
-Do not use a realm that an attacker can modify with JavaScript. An attacker with this access can replace DOM prototypes before sanitization.
+The sanitizer captures the DOM and parser operations when it first uses a runtime. Do not use a realm that an attacker can modify before this first call.
+
+For Trusted Types, create a dedicated identity policy. Pass this policy only to `sanitizeToTrustedHTML()`.
+
+Do not use the identity policy directly with a DOM sink. Direct use bypasses the sanitizer.
+
+Trusted Types do not replace sanitization. They control which code can send values to protected browser sinks.
+
+For an explicit browser runtime, create the policy in that runtime's realm. The sanitizer validates the result with that realm's Trusted Types factory.
 
 Do not add unsafe markup after sanitization. A later string transformation or DOM mutation can invalidate the result.
 
@@ -51,6 +59,8 @@ The test suite checks these invariants:
 - Inherited configuration cannot make the policy less restrictive.
 - Structured contextual cases have the same element, namespace, ancestry, and attribute signature across supported DOM implementations.
 - Malformed contextual mutations satisfy the same security invariants in every implementation, even when standards-permitted parser recovery produces different benign trees or text.
+- Trusted Types parsing uses policy-created values for all protected parser sinks.
+- The Trusted Types policy cannot change its input or return a non-TrustedHTML value.
 
 These checks run against a version-pinned public attack corpus. The suite also mutates that corpus with malformed table, select, SVG, MathML, template, raw-text, and custom-element transitions in every supported insertion context.
 

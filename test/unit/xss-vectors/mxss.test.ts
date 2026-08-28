@@ -13,6 +13,7 @@
  * - https://research.securitum.com/mutation-xss-via-mathml-mutation-dompurify-2-0-17-bypass/
  */
 
+import { JSDOM } from 'jsdom'
 import { describe, it, expect } from 'vitest'
 import { sanitize } from '../../../src/core/sanitizer.js'
 import {
@@ -248,8 +249,9 @@ describe('Mutation XSS (mXSS) Detection', () => {
     })
 
     it('fails closed after the parse stability limit', () => {
+      const dom = new JSDOM('')
       let parseCount = 0
-      const NativeDOMParser = DOMParser
+      const NativeDOMParser = dom.window.DOMParser
       class UnstableDOMParser {
         parseFromString(html: string, type: DOMParserSupportedType): Document {
           parseCount++
@@ -257,19 +259,19 @@ describe('Mutation XSS (mXSS) Detection', () => {
         }
       }
       const runtime: DOMRuntime = {
-        document,
+        document: dom.window.document,
         DOMParser: UnstableDOMParser as unknown as typeof DOMParser,
       }
 
       const innerHTML = Object.getOwnPropertyDescriptor(
-        Element.prototype,
+        dom.window.Element.prototype,
         'innerHTML'
       )
       if (!innerHTML?.get || !innerHTML.set) {
         throw new Error('The test DOM does not expose the innerHTML accessor.')
       }
 
-      Object.defineProperty(Element.prototype, 'innerHTML', {
+      Object.defineProperty(dom.window.Element.prototype, 'innerHTML', {
         configurable: innerHTML.configurable,
         enumerable: innerHTML.enumerable,
         get: innerHTML.get,
@@ -288,7 +290,7 @@ describe('Mutation XSS (mXSS) Detection', () => {
       try {
         result = sanitize('<p>Unstable</p>', { detectMXSS: true }, runtime)
       } finally {
-        Object.defineProperty(Element.prototype, 'innerHTML', innerHTML)
+        Object.defineProperty(dom.window.Element.prototype, 'innerHTML', innerHTML)
       }
 
       expect(result).toBe('')

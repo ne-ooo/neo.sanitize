@@ -13,6 +13,7 @@ Fast, secure, and lightweight HTML sanitization library that prevents XSS attack
 ✅ **Predefined Schemas** - BASIC, RELAXED, STRICT configurations
 ✅ **Customizable** - Fine-grained control over tags, attributes, and protocols
 ✅ **Cross-Realm Safe** - Supports browser realms and explicit DOM runtimes
+✅ **Trusted Types** - Returns `TrustedHTML` for CSP-protected browser sinks
 ✅ **Bundle Budget** - The ESM entry must stay within 15 KB gzipped
 
 ## Installation
@@ -96,6 +97,34 @@ const result = sanitize("<p>Hello</p>", {
 - `runtime` (object, optional) - DOM runtime for Node.js or a Web Worker
 
 **Returns:** Sanitized HTML string (default) or DocumentFragment
+
+### `sanitizeToTrustedHTML(html, policy, options?, runtime?)`
+
+Use this API in a browser that enforces Trusted Types. The API returns the exact `TrustedHTML` type from the supplied policy.
+
+```typescript
+import { sanitizeToTrustedHTML } from '@lpm.dev/neo.sanitize'
+
+const policy = trustedTypes.createPolicy('neo-sanitize', {
+  createHTML(input) {
+    return input
+  },
+})
+
+const clean = sanitizeToTrustedHTML(dirtyHtml, policy, {
+  detectMXSS: true,
+})
+
+target.innerHTML = clean
+```
+
+The policy must return its input without changes. The sanitizer uses the policy for inert parser sinks and the final sanitized result.
+
+Keep this policy private to the sanitizer integration. Direct use of the policy can bypass HTML sanitization.
+
+For an explicit browser runtime, create the policy in that runtime's realm. The sanitizer validates the result with the runtime document's Trusted Types factory.
+
+The API throws an error if Trusted Types are unavailable. It also rejects `returnString: false` because `TrustedHTML` is a string-sink type.
 
 ### Predefined Schemas
 
@@ -461,7 +490,9 @@ The current security matrix contains these checks:
 
 The tests use neo.sanitize invariants. They do not copy DOMPurify output expectations.
 
-Exact tree equality is required for structured contextual cases. Malformed inputs can recover to different benign trees in conforming parsers, so those cases must satisfy the same security invariants in every runtime instead.
+Exact tree equality is required for structured contextual cases. Malformed inputs can produce different safe trees in conforming parsers.
+
+Each runtime must apply the same security rules to malformed input.
 
 Coverage must stay at or above 90% for statements, functions, and lines. Branch coverage must stay at or above 80%.
 

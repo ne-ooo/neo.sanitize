@@ -192,6 +192,21 @@ export interface SanitizeOptions {
 /** Frozen options that reuse a compiled sanitizer policy across calls. */
 export type CompiledSanitizeOptions = Readonly<Required<Omit<SanitizeOptions, 'hooks'>>>
 
+/** Minimum opaque TrustedHTML shape returned by a browser policy. */
+export interface TrustedHTMLLike {
+  toString(): string
+}
+
+/**
+ * Trusted Types policy shape accepted by sanitizeToTrustedHTML().
+ * The generic preserves the browser policy's exact TrustedHTML return type.
+ */
+export interface TrustedTypePolicyLike<
+  TTrustedHTML extends TrustedHTMLLike = TrustedHTMLLike,
+> {
+  createHTML(input: string): TTrustedHTML
+}
+
 /**
  * Predefined sanitization schema
  */

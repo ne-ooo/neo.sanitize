@@ -1,3 +1,4 @@
+import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { compileSanitizeOptions, sanitize } from '../../../src/core/sanitizer.js'
 import type { DOMRuntime } from '../../../src/types.js'
@@ -37,12 +38,17 @@ describe('wrapper removal', () => {
   })
 
   it('builds output without reinserting nested denied wrappers', () => {
+    const dom = new JSDOM('')
+    const runtime: DOMRuntime = {
+      document: dom.window.document,
+      DOMParser: dom.window.DOMParser,
+    }
     const depth = 400
     const html = `${'<x>t'.repeat(depth)}${'</x>'.repeat(depth)}`
-    const originalInsertBefore = Node.prototype.insertBefore
+    const originalInsertBefore = dom.window.Node.prototype.insertBefore
     let insertionCount = 0
 
-    Node.prototype.insertBefore = function <T extends Node>(
+    dom.window.Node.prototype.insertBefore = function <T extends Node>(
       newNode: T,
       referenceNode: Node | null
     ): T {
@@ -51,31 +57,36 @@ describe('wrapper removal', () => {
     }
 
     try {
-      expect(sanitize(html)).toBe('t'.repeat(depth))
+      expect(sanitize(html, {}, runtime)).toBe('t'.repeat(depth))
     } finally {
-      Node.prototype.insertBefore = originalInsertBefore
+      dom.window.Node.prototype.insertBefore = originalInsertBefore
     }
 
     expect(insertionCount).toBe(1)
   })
 
   it('rebuilds only the denied subtree', () => {
+    const dom = new JSDOM('')
+    const runtime: DOMRuntime = {
+      document: dom.window.document,
+      DOMParser: dom.window.DOMParser,
+    }
     const cleanNodes = '<span>safe</span>'.repeat(100)
     const html = `${cleanNodes}<section><strong>kept</strong></section>${cleanNodes}`
-    const originalCloneNode = Node.prototype.cloneNode
+    const originalCloneNode = dom.window.Node.prototype.cloneNode
     let cloneCount = 0
 
-    Node.prototype.cloneNode = function (deep?: boolean): Node {
+    dom.window.Node.prototype.cloneNode = function (deep?: boolean): Node {
       cloneCount++
       return originalCloneNode.call(this, deep)
     }
 
     try {
-      expect(sanitize(html)).toBe(
+      expect(sanitize(html, {}, runtime)).toBe(
         `${cleanNodes}<strong>kept</strong>${cleanNodes}`
       )
     } finally {
-      Node.prototype.cloneNode = originalCloneNode
+      dom.window.Node.prototype.cloneNode = originalCloneNode
     }
 
     expect(cloneCount).toBe(2)
@@ -116,11 +127,19 @@ describe('compiled options', () => {
 
 describe('mXSS stabilization', () => {
   it('reuses the stable serialization for string output', () => {
-    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML')
+    const dom = new JSDOM('')
+    const runtime: DOMRuntime = {
+      document: dom.window.document,
+      DOMParser: dom.window.DOMParser,
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      dom.window.Element.prototype,
+      'innerHTML'
+    )
     if (!descriptor?.get) throw new Error('The DOM runtime must expose innerHTML.')
 
     let reads = 0
-    Object.defineProperty(Element.prototype, 'innerHTML', {
+    Object.defineProperty(dom.window.Element.prototype, 'innerHTML', {
       ...descriptor,
       get() {
         reads++
@@ -129,9 +148,11 @@ describe('mXSS stabilization', () => {
     })
 
     try {
-      expect(sanitize('<p>safe</p>', { detectMXSS: true })).toBe('<p>safe</p>')
+      expect(
+        sanitize('<p>safe</p>', { detectMXSS: true }, runtime)
+      ).toBe('<p>safe</p>')
     } finally {
-      Object.defineProperty(Element.prototype, 'innerHTML', descriptor)
+      Object.defineProperty(dom.window.Element.prototype, 'innerHTML', descriptor)
     }
 
     expect(reads).toBe(2)
