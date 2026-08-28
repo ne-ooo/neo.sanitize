@@ -10,7 +10,12 @@ export default defineConfig({
     exclude: [
       'test/**/*.bench.ts',
       'node_modules',
-      ...(nodeMajor < 20 ? ['test/runtime-matrix.test.ts'] : []),
+      ...(nodeMajor < 20
+        ? [
+            'test/runtime-matrix.test.ts',
+            'test/fuzz/context-differential.fast-check.test.ts',
+          ]
+        : []),
     ],
     coverage: {
       provider: 'v8',

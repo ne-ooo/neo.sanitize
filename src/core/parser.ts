@@ -5,16 +5,22 @@
  * DOM runtime when they do not expose `document` and `DOMParser` globally.
  */
 
-import type { DOMParserLike, DOMRuntime } from '../types.js'
+import type {
+  DOMParserLike,
+  DOMRuntime,
+  HTMLInsertionContext,
+} from '../types.js'
 import {
   appendNode,
   cloneDOMNode,
   createDocumentFragment,
   createElement,
   getDocumentBody,
-  getFirstChild,
+  getLastChild,
   getOwnerDocument,
+  setElementHTML,
 } from '../utils/dom.js'
+import { resolveInsertionContext } from '../utils/context.js'
 
 const PARSER_CACHE = new WeakMap<DOMRuntime['DOMParser'], DOMParserLike>()
 let cachedGlobalDocument: Document | undefined
@@ -91,30 +97,73 @@ export function resolveDOMRuntime(runtime?: DOMRuntime): DOMRuntime {
  * @param html - HTML string to parse
  * @param runtime - Optional DOM runtime for Node.js or a Web Worker
  */
-export function parseHTML(html: string, runtime?: DOMRuntime): DocumentFragment {
+export function parseHTML(
+  html: string,
+  runtime?: DOMRuntime,
+  insertionContext: HTMLInsertionContext = 'body'
+): DocumentFragment {
   const dom = resolveDOMRuntime(runtime)
-  return parseHTMLWithRuntime(html, dom)
+  return parseHTMLWithRuntime(html, dom, insertionContext)
 }
 
 /**
  * Parse HTML with a previously resolved runtime.
  */
-export function parseHTMLWithRuntime(html: string, dom: DOMRuntime): DocumentFragment {
-  const parsedDocument = parseDocumentWithRuntime(html, dom)
-  const body = getDocumentBody(parsedDocument) as HTMLBodyElement
+export function parseHTMLWithRuntime(
+  html: string,
+  dom: DOMRuntime,
+  insertionContext: HTMLInsertionContext = 'body'
+): DocumentFragment {
+  const source = parseHTMLContextWithRuntime(html, dom, insertionContext)
+  const parsedDocument = getOwnerDocument(source)
+  if (!parsedDocument) {
+    throw new TypeError(
+      '@lpm.dev/neo.sanitize: The parsed insertion context has no owner document.'
+    )
+  }
 
   // Keep untrusted nodes in the detached parser document. Adopting raw nodes
   // into the live document can start resource loads and fire event handlers
   // before the sanitizer has removed active attributes.
-  const fragment = createDocumentFragment(parsedDocument)
+  const reversed = createDocumentFragment(parsedDocument)
 
-  let child = getFirstChild(body)
+  // Remove from the end so array-backed DOM implementations do not shift all
+  // remaining siblings for every move. Reverse twice to retain source order.
+  let child = getLastChild(source)
+  while (child) {
+    appendNode(reversed, child)
+    child = getLastChild(source)
+  }
+
+  const fragment = createDocumentFragment(parsedDocument)
+  child = getLastChild(reversed)
   while (child) {
     appendNode(fragment, child)
-    child = getFirstChild(body)
+    child = getLastChild(reversed)
   }
 
   return fragment
+}
+
+/**
+ * Parse HTML into its detached receiving element without moving its children.
+ * The sanitizer uses this path to avoid superlinear top-level node removal in
+ * DOM implementations backed by arrays.
+ */
+export function parseHTMLContextWithRuntime(
+  html: string,
+  dom: DOMRuntime,
+  insertionContext: HTMLInsertionContext = 'body'
+): HTMLElement {
+  const context = resolveInsertionContext(insertionContext, 'body')
+  const parsedDocument = parseDocumentWithRuntime('', dom)
+  const source =
+    context === 'body'
+      ? (getDocumentBody(parsedDocument) as HTMLBodyElement)
+      : createElement(parsedDocument, context)
+
+  setElementHTML(source, html)
+  return source as HTMLElement
 }
 
 /**

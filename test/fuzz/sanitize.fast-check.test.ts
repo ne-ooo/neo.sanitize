@@ -54,6 +54,7 @@ const hostilePrototype = fc.record({
   allowAllAttributes: fc.constant(['script', 'iframe', 'user-card']),
   allowCustomElements: fc.constant(true),
   allowStyleAttribute: fc.constant(true),
+  insertionContext: fc.constant('script'),
   detectMXSS: fc.boolean(),
 })
 
@@ -99,6 +100,7 @@ describe('mutation-guided sanitizer fuzzing', () => {
           'allowAllAttributes',
           'allowCustomElements',
           'allowStyleAttribute',
+          'insertionContext',
           'hooks'
         ),
         (dirty, key) => {

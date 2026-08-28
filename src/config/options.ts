@@ -1,5 +1,6 @@
 import type { SanitizeOptions } from '../types.js'
 import { deepFreeze } from '../utils/object.js'
+import { resolveInsertionContext } from '../utils/context.js'
 
 export type ResolvedSanitizeOptions = Required<Omit<SanitizeOptions, 'hooks'>>
 
@@ -71,6 +72,10 @@ export function mergeOptions(
     lowercaseAttributes:
       readOwnOption(options, 'lowercaseAttributes') ?? base.lowercaseAttributes,
     returnString: readOwnOption(options, 'returnString') ?? base.returnString,
+    insertionContext: resolveInsertionContext(
+      readOwnOption(options, 'insertionContext'),
+      base.insertionContext
+    ),
     maxInputLength: resolveLimit(
       readOwnOption(options, 'maxInputLength'),
       base.maxInputLength

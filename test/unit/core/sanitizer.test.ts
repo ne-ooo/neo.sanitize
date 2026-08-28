@@ -366,28 +366,8 @@ describe('resource limits', () => {
 
   it('supports the configured depth boundary with a non-recursive runtime serializer', () => {
     const depth = 1_024
-    const fragment = document.createDocumentFragment()
-    let parent: Node = fragment
-    for (let index = 0; index < depth; index++) {
-      const element = document.createElement('div')
-      parent.appendChild(element)
-      parent = element
-    }
-    parent.appendChild(document.createTextNode('safe'))
-
-    class FragmentDOMParser {
-      parseFromString(): Document {
-        const parsed = document.implementation.createHTMLDocument('')
-        parsed.body.appendChild(fragment)
-        return parsed
-      }
-    }
-    const runtime: DOMRuntime = {
-      document,
-      DOMParser: FragmentDOMParser as unknown as typeof DOMParser,
-    }
-
-    const result = sanitize('ignored', { returnString: false }, runtime)
+    const html = `${'<div>'.repeat(depth)}safe${'</div>'.repeat(depth)}`
+    const result = sanitize(html, { returnString: false })
     expect((result as DocumentFragment).textContent).toBe('safe')
   })
 })

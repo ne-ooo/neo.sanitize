@@ -84,6 +84,7 @@ sanitize(html, {
   allowIdAttribute: false,       // id attribute (default: false)
   allowStyleAttribute: false,    // style attribute (default: false)
   allowCustomElements: false,    // custom elements (default: false)
+  insertionContext: 'body',      // element that receives the output
 })
 ```
 
@@ -92,6 +93,10 @@ The `allowedTags` option cannot enable active-content tags. Tags such as `script
 The `allowedTags` option cannot enable custom elements by default. Keep `allowCustomElements` disabled for attacker-controlled HTML.
 
 Each URL in `srcset`, `imagesrcset`, `ping`, and `attributionsrc` must have an allowed protocol.
+
+Set `insertionContext` when output goes into `table`, `tbody`, `tr`, `select`, or another supported special element. The context must match the receiving element.
+
+Raw-text, script, style, template, and foreign-namespace contexts are not supported.
 
 ## createSanitizer — Reusable Instance
 

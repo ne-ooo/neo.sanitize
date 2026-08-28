@@ -45,7 +45,7 @@
     "test:coverage": "vitest run --coverage",
     "test:package": "node scripts/verify-package.mjs",
     "test:performance": "node --expose-gc scripts/verify-performance.mjs",
-    "test:corpus": "vitest run test/security test/unit/xss-vectors/parser-contexts.test.ts test/runtime-matrix.test.ts",
+    "test:corpus": "vitest run test/security test/unit/xss-vectors/parser-contexts.test.ts test/unit/core/insertion-context.test.ts test/runtime-matrix.test.ts",
     "test:fuzz": "vitest run test/fuzz",
     "test:browser": "playwright test",
     "test:watch": "vitest",

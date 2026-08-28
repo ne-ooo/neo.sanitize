@@ -13,4 +13,9 @@ export {
   sanitizeStrict,
 } from './sanitizer.js'
 export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from './parser.js'
-export type { CompiledSanitizeOptions, DOMParserLike, DOMRuntime } from '../types.js'
+export type {
+  CompiledSanitizeOptions,
+  DOMParserLike,
+  DOMRuntime,
+  HTMLInsertionContext,
+} from '../types.js'

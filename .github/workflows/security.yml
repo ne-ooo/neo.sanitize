@@ -39,6 +39,8 @@ jobs:
       - name: Run extended fuzzing
         env:
           FUZZ_RUNS: '10000'
+          DIFFERENTIAL_FUZZ_RUNS: '10000'
+          ADVERSARIAL_CONTEXT_FUZZ_RUNS: '2000'
         run: lpm run test:fuzz
 
   browser-fuzz:
@@ -81,4 +83,5 @@ jobs:
       - name: Run the extended browser corpus
         env:
           BROWSER_FUZZ_RUNS: '1000'
+          BROWSER_DIFFERENTIAL_RUNS: '1000'
         run: lpm run test:browser -- --project=${{ matrix.browser }}
