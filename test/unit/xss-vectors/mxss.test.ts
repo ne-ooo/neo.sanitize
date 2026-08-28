@@ -253,9 +253,7 @@ describe('Mutation XSS (mXSS) Detection', () => {
       class UnstableDOMParser {
         parseFromString(html: string, type: DOMParserSupportedType): Document {
           parseCount++
-          const parsed = new NativeDOMParser().parseFromString(html, type)
-          parsed.body.textContent = `cycle-${parseCount}`
-          return parsed
+          return new NativeDOMParser().parseFromString(html, type)
         }
       }
       const runtime: DOMRuntime = {
@@ -263,7 +261,35 @@ describe('Mutation XSS (mXSS) Detection', () => {
         DOMParser: UnstableDOMParser as unknown as typeof DOMParser,
       }
 
-      const result = sanitize('<p>Unstable</p>', { detectMXSS: true }, runtime)
+      const innerHTML = Object.getOwnPropertyDescriptor(
+        Element.prototype,
+        'innerHTML'
+      )
+      if (!innerHTML?.get || !innerHTML.set) {
+        throw new Error('The test DOM does not expose the innerHTML accessor.')
+      }
+
+      Object.defineProperty(Element.prototype, 'innerHTML', {
+        configurable: innerHTML.configurable,
+        enumerable: innerHTML.enumerable,
+        get: innerHTML.get,
+        set(value: string) {
+          const nextValue =
+            (this as Element).localName === 'body'
+              ? `<p>cycle-${parseCount}</p>`
+              : value
+          Reflect.apply(innerHTML.set as (value: string) => void, this, [
+            nextValue,
+          ])
+        },
+      })
+
+      let result: string | DocumentFragment
+      try {
+        result = sanitize('<p>Unstable</p>', { detectMXSS: true }, runtime)
+      } finally {
+        Object.defineProperty(Element.prototype, 'innerHTML', innerHTML)
+      }
 
       expect(result).toBe('')
       expect(parseCount).toBe(4)

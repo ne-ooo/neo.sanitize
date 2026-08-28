@@ -89,10 +89,12 @@ export {
   DATA_ATTRIBUTE_REGEX,
   ARIA_ATTRIBUTE_REGEX,
 } from './utils/constants.js'
+export { HTML_INSERTION_CONTEXTS } from './utils/context.js'
 
 // TypeScript types
 export type {
   SanitizeOptions,
+  HTMLInsertionContext,
   CompiledSanitizeOptions,
   DOMParserLike,
   DOMRuntime,

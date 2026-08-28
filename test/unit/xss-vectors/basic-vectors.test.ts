@@ -82,8 +82,7 @@ describe('Basic XSS Vectors', () => {
     it('should handle whitespace only', () => {
       const html = '   \n   \t   '
       const result = sanitize(html)
-      // Browser DOMParser normalizes whitespace-only content to empty string
-      expect(result).toBe('')
+      expect(result).toBe(html)
     })
 
     it('should handle empty tags', () => {

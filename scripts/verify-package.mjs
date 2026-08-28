@@ -61,7 +61,7 @@ function assertBundleBudget() {
   const esmEntry = readFileSync(resolvePackagePath(manifest.module))
   const compressedBytes = gzipSync(esmEntry, { level: 9 }).byteLength
   const maximumCompressedBytes = 15 * 1024
-  const maximumRawBytes = 34 * 1024
+  const maximumRawBytes = 36 * 1024
   const distributionBytes = getDirectorySize(resolve(packageRoot, 'dist'))
   const maximumDistributionBytes = 350 * 1024
 

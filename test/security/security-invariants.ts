@@ -1,5 +1,9 @@
 import { expect } from 'vitest'
-import type { DOMRuntime } from '../../src/types.js'
+import type {
+  DOMRuntime,
+  HTMLInsertionContext,
+} from '../../src/types.js'
+import { parseHTML } from '../../src/core/parser.js'
 import { isDangerousTag } from '../../src/validators/tags.js'
 import { isSafeURLAttributeValue } from '../../src/validators/protocols.js'
 import { URL_ATTRIBUTES } from '../../src/utils/constants.js'
@@ -17,11 +21,11 @@ const PARSER_CONTEXT_ATTRIBUTES = new Set([
 
 export function assertHTMLSecurityInvariants(
   html: string,
-  runtime?: DOMRuntime
+  runtime?: DOMRuntime,
+  insertionContext: HTMLInsertionContext = 'body'
 ): void {
-  const Parser = runtime?.DOMParser ?? DOMParser
-  const parsed = new Parser().parseFromString(html, 'text/html')
-  const elements = Array.from(parsed.body.querySelectorAll('*'))
+  const fragment = parseHTML(html, runtime, insertionContext)
+  const elements = Array.from(fragment.querySelectorAll('*'))
 
   for (const element of elements) {
     const tagName = element.localName.toLowerCase()

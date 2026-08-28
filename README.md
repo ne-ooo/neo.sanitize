@@ -211,7 +211,7 @@ const clean = sanitize(dirtyHtml, {}, runtime);
 
 Web Workers must also supply `{ document, DOMParser }`. The two APIs must come from the same compatible DOM implementation.
 
-Pass the runtime as the second argument to a preset helper. Pass it to `parseHTML` as the second argument.
+Pass the runtime as the second argument to a preset helper. Pass it to `parseHTML` as the second argument. Pass an insertion context as the third argument to `parseHTML`.
 
 The `createSanitizer` function stores its runtime. Each call to its `sanitize` method uses that runtime.
 
@@ -242,6 +242,7 @@ interface SanitizeOptions {
 
   // Output format
   returnString?: boolean; // Return string (default: true) or DocumentFragment
+  insertionContext?: HTMLInsertionContext; // Default: 'body'
 
   // Resource limits (fail closed when exceeded)
   maxInputLength?: number; // Default: 200,000 UTF-16 code units
@@ -260,6 +261,24 @@ interface SanitizeOptions {
   detectMXSS?: boolean; // Require stable output after reparsing
 }
 ```
+
+### Insertion Contexts
+
+HTML parsing depends on the element that receives the output. Set `insertionContext` when the target is a table or select element.
+
+```typescript
+const cleanRows = sanitize(userRows, {
+  insertionContext: 'tbody',
+})
+
+tableBody.innerHTML = cleanRows
+```
+
+Supported contexts are `body`, `div`, `table`, `caption`, `colgroup`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th`, `select`, `optgroup`, and `option`.
+
+The default is `body` for compatibility. Raw-text, script, style, template, and foreign-namespace contexts are rejected.
+
+The configured context must match the element that receives the output. Do not sanitize for `body` and then insert the result into a table context.
 
 ## Examples
 
@@ -433,10 +452,16 @@ The current security matrix contains these checks:
 - 223 fixtures from the DOMPurify 3.4.14 corpus, pinned by commit and SHA-256.
 - Corpus checks in Chromium, Firefox, WebKit, jsdom, and happy-dom.
 - 300 deterministic fast-check runs in each standard test run.
+- 300 shrinkable structured context cases compared between jsdom and happy-dom.
+- 300 corpus-seeded malformed context mutations checked in both Node DOM runtimes.
 - 40 generated malformed inputs in each browser pull-request job.
-- 10,000 fast-check runs and 1,000 generated inputs per browser in the scheduled workflow.
+- 40 shrinkable structured context cases compared between jsdom and each browser engine.
+- 40 corpus-seeded malformed context mutations checked in each browser engine.
+- 10,000 structured and 2,000 corpus-seeded malformed context runs, plus 1,000 of each per browser, in the scheduled workflow.
 
 The tests use neo.sanitize invariants. They do not copy DOMPurify output expectations.
+
+Exact tree equality is required for structured contextual cases. Malformed inputs can recover to different benign trees in conforming parsers, so those cases must satisfy the same security invariants in every runtime instead.
 
 Coverage must stay at or above 90% for statements, functions, and lines. Branch coverage must stay at or above 80%.
 

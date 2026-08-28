@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - Added a version-pinned public attack corpus with Apache-2.0 attribution.
 - Added browser-engine, DOM-runtime, parser-context, and property-fuzz checks.
+- Added context-aware parsing for ordinary, table, and select insertion targets.
+- Added shrinkable structural differential fuzzing and corpus-seeded malformed context mutations across five DOM implementations.
 - Added test coverage gates for statements, branches, functions, and lines.
 - Added package checks for public exports, skill versions, required files, and the bundle budget.
 - Added CI checks for Node.js 18, 20, and 22.

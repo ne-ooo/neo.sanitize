@@ -113,6 +113,21 @@ export function createElement(document: Document, name: string): HTMLElement {
   return callDOMMethod<HTMLElement>(document, 'createElement', [name])
 }
 
+export function setElementHTML(element: Element, html: string): void {
+  let prototype = Object.getPrototypeOf(element) as object | null
+
+  while (prototype) {
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'innerHTML')?.set
+    if (setter) {
+      Reflect.apply(setter, element, [html])
+      return
+    }
+    prototype = Object.getPrototypeOf(prototype) as object | null
+  }
+
+  throw new TypeError('DOM innerHTML setter is not available.')
+}
+
 export function removeElementAttribute(element: Element, name: string): void {
   callDOMMethod<void>(element, 'removeAttribute', [name])
 }

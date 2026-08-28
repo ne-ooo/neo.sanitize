@@ -51,6 +51,7 @@ export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = deepFre
   lowercaseTags: true, // Normalize tag names to lowercase
   lowercaseAttributes: true, // Normalize attribute names to lowercase
   returnString: true, // Return sanitized HTML as string (not DocumentFragment)
+  insertionContext: 'body', // Preserve document-body parsing by default
   maxInputLength: 200_000, // Bound work before the DOM runtime parses input
   maxDOMNodes: 100_000, // Bound traversal and mutation work after parsing
   maxDOMDepth: 1_024, // Bound nested DOM traversal and serializer depth

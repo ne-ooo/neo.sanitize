@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { performance } from 'node:perf_hooks'
+import { Window } from 'happy-dom'
 import { JSDOM } from 'jsdom'
 import { isSafeURLAttributeValue, sanitize } from '../dist/index.js'
 
@@ -113,17 +114,18 @@ const preflightRuntime = {
   DOMParser: EmptyDOMParser,
 }
 const rawTextPairs = '<xmp></xmp>'.repeat(15_000)
-const deepRawTextPairs =
-  '<x>'.repeat(1_000) + rawTextPairs + '</x>'.repeat(1_000)
+const flatPreflightInput = rawTextPairs + '<x>'.repeat(1_025)
+const deepPreflightInput =
+  '<x>'.repeat(1_000) + rawTextPairs + '<x>'.repeat(25)
 const preflightOptions = { maxDOMDepth: 1_024 }
 
-sanitize(rawTextPairs, preflightOptions, preflightRuntime)
-sanitize(deepRawTextPairs, preflightOptions, preflightRuntime)
+sanitize(flatPreflightInput, preflightOptions, preflightRuntime)
+sanitize(deepPreflightInput, preflightOptions, preflightRuntime)
 const flatPreflightMs = medianDuration(() =>
-  sanitize(rawTextPairs, preflightOptions, preflightRuntime)
+  sanitize(flatPreflightInput, preflightOptions, preflightRuntime)
 )
 const deepPreflightMs = medianDuration(() =>
-  sanitize(deepRawTextPairs, preflightOptions, preflightRuntime)
+  sanitize(deepPreflightInput, preflightOptions, preflightRuntime)
 )
 assert.ok(
   ratio(deepPreflightMs, flatPreflightMs) < 3,
@@ -144,11 +146,36 @@ const urlMs = performance.now() - urlStart
 assert.ok(urlMs < 250, 'Unsafe-first URL-list validation did not stop early.')
 assert.ok(urlHeap < 24 * MEBIBYTE, 'Unsafe-first URL-list validation allocated too much heap.')
 
+const happyWindow = new Window()
+const happyRuntime = {
+  document: happyWindow.document,
+  DOMParser: happyWindow.DOMParser,
+}
+const contextualSmall = '<p>x</p>'.repeat(8_000)
+const contextualLarge = contextualSmall.repeat(2)
+const contextualOptions = { insertionContext: 'div' }
+
+sanitize(contextualSmall, contextualOptions, happyRuntime)
+sanitize(contextualLarge, contextualOptions, happyRuntime)
+const contextualSmallMs = medianDuration(
+  () => sanitize(contextualSmall, contextualOptions, happyRuntime),
+  3
+)
+const contextualLargeMs = medianDuration(
+  () => sanitize(contextualLarge, contextualOptions, happyRuntime),
+  3
+)
+assert.ok(
+  ratio(contextualLargeMs, contextualSmallMs) < 2.8,
+  'Contextual top-level traversal scaled beyond the regression limit.'
+)
+
 console.log(
   JSON.stringify({
     cleanScalingRatio: ratio(cleanLargeMs, cleanSmallMs),
     deniedWrapperTimeRatio: ratio(wrappedMs, cleanLargeMs),
     deniedWrapperHeapRatio: ratio(wrappedHeap, cleanHeap),
+    contextualScalingRatio: ratio(contextualLargeMs, contextualSmallMs),
     nestedCSSRatio: ratio(nestedCSSMs, flatCSSMs),
     rawTextPreflightRatio: ratio(deepPreflightMs, flatPreflightMs),
     unsafeFirstURLMilliseconds: urlMs,

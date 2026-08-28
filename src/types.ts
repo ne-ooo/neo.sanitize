@@ -4,6 +4,23 @@
  * Comprehensive type system for HTML sanitization configuration and results.
  */
 
+/** HTML element contexts supported by the fragment parser. */
+export type HTMLInsertionContext =
+  | 'body'
+  | 'div'
+  | 'table'
+  | 'caption'
+  | 'colgroup'
+  | 'thead'
+  | 'tbody'
+  | 'tfoot'
+  | 'tr'
+  | 'td'
+  | 'th'
+  | 'select'
+  | 'optgroup'
+  | 'option'
+
 /**
  * Configuration options for HTML sanitization
  */
@@ -113,6 +130,14 @@ export interface SanitizeOptions {
    * @default true
    */
   returnString?: boolean
+
+  /**
+   * HTML element context that will receive the sanitized output.
+   * Use this for table or select content because HTML fragment parsing is
+   * context-sensitive. Raw-text and foreign-namespace contexts are rejected.
+   * @default 'body'
+   */
+  insertionContext?: HTMLInsertionContext
 
   /**
    * Maximum number of UTF-16 code units accepted after beforeSanitize runs.

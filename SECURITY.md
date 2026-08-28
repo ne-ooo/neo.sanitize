@@ -24,6 +24,10 @@ The sanitizer ignores inherited configuration properties. It also ignores config
 
 Use the output only in an HTML element-content context. Do not use it in JavaScript, CSS, URL, or attribute contexts.
 
+Set `insertionContext` to the element that will receive the output. This is required for table and select content.
+
+The sanitizer rejects raw-text, script, style, template, and foreign-namespace insertion contexts.
+
 Treat hooks as trusted application code. A hook cannot retain a blocked element, but the hook itself can run arbitrary code.
 
 Use a trusted DOM runtime. The `document` and `DOMParser` values must come from the same implementation.
@@ -45,10 +49,12 @@ The test suite checks these invariants:
 - A repeated parse and sanitize operation does not create active content.
 - Parser errors and resource-limit failures return empty output.
 - Inherited configuration cannot make the policy less restrictive.
+- Structured contextual cases have the same element, namespace, ancestry, and attribute signature across supported DOM implementations.
+- Malformed contextual mutations satisfy the same security invariants in every implementation, even when standards-permitted parser recovery produces different benign trees or text.
 
-These checks run against a version-pinned public attack corpus. The suite also uses generated malformed input and multiple DOM implementations.
+These checks run against a version-pinned public attack corpus. The suite also mutates that corpus with malformed table, select, SVG, MathML, template, raw-text, and custom-element transitions in every supported insertion context.
 
-The deterministic corpus runs in Chromium, Firefox, WebKit, jsdom, and happy-dom. Pull requests run these checks.
+The deterministic corpus runs in Chromium, Firefox, WebKit, jsdom, and happy-dom. Pull requests run exact structural comparisons for parser-compatible cases and per-runtime security invariants for malformed corpus mutations across these implementations.
 
 A scheduled workflow runs longer mutation campaigns. Fast-check reports a seed and path when it finds a failure.
 

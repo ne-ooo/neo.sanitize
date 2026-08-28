@@ -5,6 +5,7 @@
 import type {
   DOMRuntime,
   CompiledSanitizeOptions,
+  HTMLInsertionContext,
   SanitizeHooks,
   SanitizeOptions,
   Sanitizer,
@@ -15,7 +16,7 @@ import type { ResolvedSanitizeOptions } from '../config/options.js'
 import { BASIC_SCHEMA, RELAXED_SCHEMA, STRICT_SCHEMA } from '../config/schemas.js'
 import {
   consumeAndSerializeHTML,
-  parseDocumentWithRuntime,
+  parseHTMLContextWithRuntime,
   resolveDOMRuntime,
   serializeHTML,
 } from './parser.js'
@@ -31,7 +32,6 @@ import {
   cloneDOMNode,
   createDocumentFragment,
   getChildNodes,
-  getDocumentBody,
   getElementAttributes,
   getElementLocalName,
   getFirstChild,
@@ -261,7 +261,13 @@ function sanitizeWithPolicy(
       : createDocumentFragment(resolveDOMRuntime(runtime).document)
   }
 
-  if (exceedsMarkupDepth(processedHtml, config.maxDOMDepth)) {
+  if (
+    exceedsMarkupDepth(
+      processedHtml,
+      config.maxDOMDepth,
+      config.insertionContext
+    )
+  ) {
     return config.returnString
       ? ''
       : createDocumentFragment(resolveDOMRuntime(runtime).document)
@@ -276,29 +282,39 @@ function sanitizeWithPolicy(
     !hooks?.afterSanitize
 
   if (useDirectStringPath) {
-    let parsedDocument: Document
+    let parsedSource: HTMLElement
     try {
-      parsedDocument = parseDocumentWithRuntime(processedHtml, dom)
+      parsedSource = parseHTMLContextWithRuntime(
+        processedHtml,
+        dom,
+        config.insertionContext
+      )
     } catch {
       return ''
     }
-    const body = getDocumentBody(parsedDocument) as HTMLBodyElement
-    if (!sanitizeNodeInPlace(body, policy)) return ''
-    return body.innerHTML
+    if (!sanitizeNodeInPlace(parsedSource, policy)) return ''
+    return parsedSource.innerHTML
   }
 
-  let parsedDocument: Document
+  let parsedSource: HTMLElement
   try {
-    parsedDocument = parseDocumentWithRuntime(processedHtml, dom)
+    parsedSource = parseHTMLContextWithRuntime(
+      processedHtml,
+      dom,
+      config.insertionContext
+    )
   } catch {
     return config.returnString ? '' : createDocumentFragment(dom.document)
   }
 
-  const body = getDocumentBody(parsedDocument) as HTMLBodyElement
-
   // User hooks run only in this pass.
   const traversalHooks = hooks?.onElement || hooks?.onAttribute ? hooks : undefined
-  const sanitizedFragment = sanitizeNode(body, policy, traversalHooks, dom.document)
+  const sanitizedFragment = buildSanitizedFragment(
+    parsedSource,
+    policy,
+    traversalHooks,
+    dom.document
+  )
   if (!sanitizedFragment) {
     return config.returnString ? '' : createDocumentFragment(dom.document)
   }
@@ -351,7 +367,11 @@ function sanitizeWithPolicy(
  * DOM runtime. The DOM traversal remains authoritative because HTML tree
  * construction can repair malformed markup in ways a bounded preflight cannot.
  */
-function exceedsMarkupDepth(html: string, maximumDepth: number): boolean {
+function exceedsMarkupDepth(
+  html: string,
+  maximumDepth: number,
+  insertionContext: HTMLInsertionContext
+): boolean {
   const openTags: Array<{
     name: string
     foreign: boolean
@@ -475,10 +495,13 @@ function exceedsMarkupDepth(html: string, maximumDepth: number): boolean {
     // Count every non-void tag so `<div/>` cannot bypass the parser preflight.
     const parentIsForeign = openTags[openTags.length - 1]?.foreign ?? false
     if (parentIsForeign || !PREFLIGHT_VOID_TAGS.has(tagName)) {
-      const depthContribution = 1 + getImplicitTableDepth(
-        tagName,
-        openTags[openTags.length - 1]
-      )
+      const depthContribution =
+        1 +
+        getImplicitTableDepth(
+          tagName,
+          openTags[openTags.length - 1] ??
+            getInsertionContextTableParent(insertionContext)
+        )
       const foreign = parentIsForeign || tagName === 'svg' || tagName === 'math'
       openTags.push({
         name: tagName,
@@ -494,6 +517,22 @@ function exceedsMarkupDepth(html: string, maximumDepth: number): boolean {
   }
 
   return false
+}
+
+function getInsertionContextTableParent(
+  insertionContext: HTMLInsertionContext
+): { name: string; foreign: false } | undefined {
+  if (
+    insertionContext === 'table' ||
+    insertionContext === 'thead' ||
+    insertionContext === 'tbody' ||
+    insertionContext === 'tfoot' ||
+    insertionContext === 'tr'
+  ) {
+    return { name: insertionContext, foreign: false }
+  }
+
+  return undefined
 }
 
 function getImplicitTableDepth(
@@ -1026,9 +1065,17 @@ function stabilizeMXSS(
   for (let pass = 0; pass < MAX_MXSS_STABILIZATION_PASSES; pass++) {
     let sanitized: DocumentFragment | null
     try {
-      const parsedDocument = parseDocumentWithRuntime(serialized, runtime)
-      const body = getDocumentBody(parsedDocument) as HTMLBodyElement
-      sanitized = sanitizeNode(body, policy, undefined, runtime.document)
+      const parsedSource = parseHTMLContextWithRuntime(
+        serialized,
+        runtime,
+        policy.config.insertionContext
+      )
+      sanitized = buildSanitizedFragment(
+        parsedSource,
+        policy,
+        undefined,
+        runtime.document
+      )
     } catch {
       return {
         fragment: createDocumentFragment(runtime.document),
