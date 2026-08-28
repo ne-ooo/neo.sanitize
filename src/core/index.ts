@@ -14,6 +14,7 @@ export {
   sanitizeStrict,
 } from './sanitizer.js'
 export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from './parser.js'
+export { SANITIZER_VERSION } from '../version.js'
 export type {
   CompiledSanitizeOptions,
   DOMParserLike,

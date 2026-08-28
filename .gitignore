@@ -10,6 +10,7 @@ coverage
 !.lpm/skills/**
 /test-results/
 /playwright-report/
+/security-artifacts/
 
 # LPM wrapper tree (auto-generated)
 .lpm/wrappers/

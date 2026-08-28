@@ -110,6 +110,7 @@ function assertSanitizer(module, runtime) {
   const input = '<script>alert(1)</script><p onclick="alert(1)">Safe</p>'
   assert.equal(module.sanitize(input, {}, runtime), '<p>Safe</p>')
   assert.equal(typeof module.sanitizeToTrustedHTML, 'function')
+  assert.equal(module.SANITIZER_VERSION, manifest.version)
 }
 
 assert.equal(Object.keys(manifest.dependencies ?? {}).length, 0, 'Runtime dependencies are not allowed')

@@ -1,7 +1,7 @@
 ---
 name: getting-started
 description: Use neo.sanitize to remove XSS from untrusted HTML. Covers sanitize(), Trusted Types, reusable sanitizers, schemas, options, protocol and CSS checks, DOM clobbering, mXSS detection, hooks, DOM runtimes, subpath imports, and TypeScript types.
-version: "1.0.0"
+version: "1.1.0"
 globs:
   - "**/*.ts"
   - "**/*.tsx"

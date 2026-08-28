@@ -126,6 +126,14 @@ For an explicit browser runtime, create the policy in that runtime's realm. The 
 
 The API throws an error if Trusted Types are unavailable. It also rejects `returnString: false` because `TrustedHTML` is a string-sink type.
 
+### `SANITIZER_VERSION`
+
+Use `SANITIZER_VERSION` in logs, security reports, and runtime diagnostics.
+
+```typescript
+import { SANITIZER_VERSION } from '@lpm.dev/neo.sanitize'
+```
+
 ### Predefined Schemas
 
 #### `sanitizeBasic(html)`
@@ -476,9 +484,11 @@ Each limit is configurable. Exceeding a limit returns an empty string or empty f
 
 The suite covers sanitizer behavior, configuration, resource limits, hooks, runtimes, public attack corpora, fuzzing, and XSS regressions.
 
+The 1.1.0 release check runs 828 tests. Its main ESM entry is 41,493 bytes raw and 13,142 bytes gzip.
+
 The current security matrix contains these checks:
 
-- 223 fixtures from the DOMPurify 3.4.14 corpus, pinned by commit and SHA-256.
+- A fixture corpus from a versioned DOMPurify release, pinned by commit and SHA-256.
 - Corpus checks in Chromium, Firefox, WebKit, jsdom, and happy-dom.
 - 300 deterministic fast-check runs in each standard test run.
 - 300 shrinkable structured context cases compared between jsdom and happy-dom.

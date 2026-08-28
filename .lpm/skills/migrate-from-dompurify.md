@@ -1,7 +1,7 @@
 ---
 name: migrate-from-dompurify
 description: Security-focused migration guide from DOMPurify and sanitize-html to neo.sanitize, including schemas, validators, TypeScript, hooks, and subpath imports
-version: "1.0.0"
+version: "1.1.0"
 globs:
   - "**/*.ts"
   - "**/*.tsx"

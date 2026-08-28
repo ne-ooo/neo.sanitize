@@ -5,7 +5,7 @@
 - Project: DOMPurify
 - Source: `test/fixtures/expect.mjs`
 - Version: 3.4.14
-- Commit: `1a49d19d1f57f67e263a3c6213faf7b4e9db8d7a`
+- Commit: `4e6fe24173f1a85eafacd95e3c82966e29d34d49`
 - Source SHA-256: `1c8f8dad1874fcd375665070a8e2be8e011b63a6d6b2ce27ab08585e324eef75`
 - Copyright: Cure53 and other contributors
 - License: Apache License 2.0
