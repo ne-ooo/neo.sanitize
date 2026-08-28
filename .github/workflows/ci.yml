@@ -31,7 +31,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Install LPM CLI
-        run: npm install --global @lpm-registry/cli@0.73.0 --allow-scripts=@lpm-registry/cli
+        run: npm install --global @lpm-registry/cli@0.76.5 --allow-scripts=@lpm-registry/cli
 
       - name: Cache the LPM store
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -80,7 +80,7 @@ jobs:
           node-version: '22'
 
       - name: Install LPM CLI
-        run: npm install --global @lpm-registry/cli@0.73.0 --allow-scripts=@lpm-registry/cli
+        run: npm install --global @lpm-registry/cli@0.76.5 --allow-scripts=@lpm-registry/cli
 
       - name: Cache the LPM store
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -117,7 +117,7 @@ jobs:
           node-version: '22'
 
       - name: Install LPM CLI
-        run: npm install --global @lpm-registry/cli@0.73.0 --allow-scripts=@lpm-registry/cli
+        run: npm install --global @lpm-registry/cli@0.76.5 --allow-scripts=@lpm-registry/cli
 
       - name: Cache the LPM store
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
