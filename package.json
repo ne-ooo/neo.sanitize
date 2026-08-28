@@ -45,6 +45,9 @@
     "test:coverage": "vitest run --coverage",
     "test:package": "node scripts/verify-package.mjs",
     "test:performance": "node --expose-gc scripts/verify-performance.mjs",
+    "test:corpus": "vitest run test/security test/unit/xss-vectors/parser-contexts.test.ts test/runtime-matrix.test.ts",
+    "test:fuzz": "vitest run test/fuzz",
+    "test:browser": "playwright test",
     "test:watch": "vitest",
     "bench": "vitest bench",
     "typecheck": "tsc --noEmit",
@@ -85,14 +88,17 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@types/node": "^20.11.0",
     "@vitest/coverage-v8": "^3.2.6",
-    "dompurify": "^3.0.9",
+    "dompurify": "^3.4.14",
+    "fast-check": "4.9.0",
+    "happy-dom": "20.11.10",
     "jsdom": "^24.0.0",
     "sanitize-html": "^2.12.1",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.6",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "vitest": "^3.2.6"
   }
 }

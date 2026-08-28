@@ -244,6 +244,28 @@ describe('validateAttribute', () => {
     expect(validateAttribute('__proto__', 'href', 'https://safe.test').allowed).toBe(false)
   })
 
+  it('rejects customized built-ins unless custom elements are enabled', () => {
+    const attributes = { button: ['is'] }
+
+    expect(isAttributeAllowed('button', 'is', attributes)).toBe(false)
+    expect(
+      isAttributeAllowed('button', 'is', attributes, {
+        allowCustomElements: true,
+      })
+    ).toBe(true)
+  })
+
+  it('always rejects srcdoc', () => {
+    expect(
+      isAttributeAllowed('div', 'srcdoc', { div: ['srcdoc'] })
+    ).toBe(false)
+    expect(
+      validateAttribute('div', 'srcdoc', '<script>alert(1)</script>', {
+        div: ['srcdoc'],
+      })
+    ).toMatchObject({ allowed: false, reason: 'Forbidden attribute: srcdoc' })
+  })
+
   it('allows safe href on <a> tag', () => {
     const result = validateAttribute('a', 'href', 'https://example.com')
     expect(result.allowed).toBe(true)

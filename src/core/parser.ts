@@ -6,6 +6,15 @@
  */
 
 import type { DOMParserLike, DOMRuntime } from '../types.js'
+import {
+  appendNode,
+  cloneDOMNode,
+  createDocumentFragment,
+  createElement,
+  getDocumentBody,
+  getFirstChild,
+  getOwnerDocument,
+} from '../utils/dom.js'
 
 const PARSER_CACHE = new WeakMap<DOMRuntime['DOMParser'], DOMParserLike>()
 let cachedGlobalDocument: Document | undefined
@@ -92,10 +101,17 @@ export function parseHTML(html: string, runtime?: DOMRuntime): DocumentFragment 
  */
 export function parseHTMLWithRuntime(html: string, dom: DOMRuntime): DocumentFragment {
   const parsedDocument = parseDocumentWithRuntime(html, dom)
-  const fragment = dom.document.createDocumentFragment()
+  const body = getDocumentBody(parsedDocument) as HTMLBodyElement
 
-  while (parsedDocument.body.firstChild) {
-    fragment.appendChild(parsedDocument.body.firstChild)
+  // Keep untrusted nodes in the detached parser document. Adopting raw nodes
+  // into the live document can start resource loads and fire event handlers
+  // before the sanitizer has removed active attributes.
+  const fragment = createDocumentFragment(parsedDocument)
+
+  let child = getFirstChild(body)
+  while (child) {
+    appendNode(fragment, child)
+    child = getFirstChild(body)
   }
 
   return fragment
@@ -120,7 +136,7 @@ export function parseDocumentWithRuntime(html: string, dom: DOMRuntime): Documen
     })
   }
 
-  if (!parsedDocument?.body) {
+  if (!parsedDocument || !getDocumentBody(parsedDocument)) {
     throw new TypeError(
       '@lpm.dev/neo.sanitize: The DOM runtime parser did not return an HTML document with a body.'
     )
@@ -133,14 +149,14 @@ export function parseDocumentWithRuntime(html: string, dom: DOMRuntime): Documen
  * Serialize a document fragment to an HTML string.
  */
 export function serializeHTML(fragment: DocumentFragment): string {
-  const ownerDocument = fragment.ownerDocument
+  const ownerDocument = getOwnerDocument(fragment)
 
   if (!ownerDocument) {
     throw new Error('@lpm.dev/neo.sanitize: Cannot serialize a fragment without an owner document.')
   }
 
-  const container = ownerDocument.createElement('div')
-  container.appendChild(fragment.cloneNode(true))
+  const container = createElement(ownerDocument, 'div')
+  appendNode(container, cloneDOMNode(fragment, true))
   return container.innerHTML
 }
 
@@ -148,13 +164,13 @@ export function serializeHTML(fragment: DocumentFragment): string {
  * Serialize a final result without cloning a fragment that will be discarded.
  */
 export function consumeAndSerializeHTML(fragment: DocumentFragment): string {
-  const ownerDocument = fragment.ownerDocument
+  const ownerDocument = getOwnerDocument(fragment)
 
   if (!ownerDocument) {
     throw new Error('@lpm.dev/neo.sanitize: Cannot serialize a fragment without an owner document.')
   }
 
-  const container = ownerDocument.createElement('div')
-  container.appendChild(fragment)
+  const container = createElement(ownerDocument, 'div')
+  appendNode(container, fragment)
   return container.innerHTML
 }

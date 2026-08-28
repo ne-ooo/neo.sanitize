@@ -24,6 +24,14 @@
  */
 
 import { deepFreeze } from '../utils/object.js'
+import {
+  getElementLocalName,
+  getElementNamespace,
+  getFirstChild,
+  getNextSibling,
+  getNodeType,
+  removeNode,
+} from '../utils/dom.js'
 
 const ELEMENT_NODE = 1
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
@@ -182,9 +190,12 @@ export function isDangerousInForeignContext(tagName: string): boolean {
 /**
  * Check if an element uses SVG, MathML, or another foreign namespace.
  */
-export function isForeignNamespace(element: Element): boolean {
-  const tagName = element.tagName.toLowerCase()
-  const namespace = element.namespaceURI
+export function isForeignNamespace(
+  element: Element,
+  normalizedTagName?: string
+): boolean {
+  const tagName = normalizedTagName ?? getElementLocalName(element).toLowerCase()
+  const namespace = getElementNamespace(element)
 
   return (
     isNamespaceSwitchingTag(tagName) ||
@@ -223,7 +234,7 @@ export function validateMXSS(
   const forbiddenPatterns: Array<{ parent: string; child: string; reason: string }> = []
 
   const stack: Array<{ child: ChildNode | null; parentTag: string | null }> = [
-    { child: node.firstChild, parentTag: null },
+    { child: getFirstChild(node), parentTag: null },
   ]
 
   while (stack.length > 0) {
@@ -235,18 +246,18 @@ export function validateMXSS(
       stack.pop()
       continue
     }
-    frame.child = child.nextSibling
+    frame.child = getNextSibling(child)
 
-    if (child.nodeType !== ELEMENT_NODE) continue
+    if (getNodeType(child) !== ELEMENT_NODE) continue
 
     const element = child as Element
-    const tagName = element.tagName.toLowerCase()
+    const tagName = getElementLocalName(element).toLowerCase()
 
-    if (isForeignNamespace(element)) {
+    if (isForeignNamespace(element, tagName)) {
       forbiddenPatterns.push({
-        parent: element.namespaceURI ?? 'unknown',
+        parent: getElementNamespace(element) ?? 'unknown',
         child: tagName,
-        reason: `Foreign namespace detected: ${element.namespaceURI ?? tagName}`,
+        reason: `Foreign namespace detected: ${getElementNamespace(element) ?? tagName}`,
       })
       continue
     }
@@ -262,7 +273,7 @@ export function validateMXSS(
       }
     }
 
-    stack.push({ child: element.firstChild, parentTag: tagName })
+    stack.push({ child: getFirstChild(element), parentTag: tagName })
   }
 
   // Return result
@@ -300,7 +311,7 @@ export function sanitizeMXSS(node: Node, detectMXSS: boolean = false): number {
   let removedCount = 0
 
   const stack: Array<{ child: ChildNode | null; parentTag: string | null }> = [
-    { child: node.firstChild, parentTag: null },
+    { child: getFirstChild(node), parentTag: null },
   ]
 
   while (stack.length > 0) {
@@ -312,17 +323,17 @@ export function sanitizeMXSS(node: Node, detectMXSS: boolean = false): number {
       stack.pop()
       continue
     }
-    frame.child = child.nextSibling
+    frame.child = getNextSibling(child)
 
-    if (child.nodeType !== ELEMENT_NODE) continue
+    if (getNodeType(child) !== ELEMENT_NODE) continue
 
     const element = child as Element
-    const tagName = element.tagName.toLowerCase()
+    const tagName = getElementLocalName(element).toLowerCase()
 
     // Foreign namespaces change HTML parsing rules. Remove the complete
     // subtree even when a custom tag allowlist contains svg or math.
-    if (isForeignNamespace(element)) {
-      element.parentNode?.removeChild(element)
+    if (isForeignNamespace(element, tagName)) {
+      removeNode(element)
       removedCount++
       continue
     }
@@ -330,13 +341,13 @@ export function sanitizeMXSS(node: Node, detectMXSS: boolean = false): number {
     if (frame.parentTag) {
       const nestingCheck = isForbiddenNesting(frame.parentTag, tagName)
       if (nestingCheck.forbidden) {
-        element.parentNode?.removeChild(element)
+        removeNode(element)
         removedCount++
         continue
       }
     }
 
-    stack.push({ child: element.firstChild, parentTag: tagName })
+    stack.push({ child: getFirstChild(element), parentTag: tagName })
   }
 
   return removedCount

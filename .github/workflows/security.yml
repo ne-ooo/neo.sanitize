@@ -1,0 +1,84 @@
+name: Extended security checks
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Extended mutation fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install LPM CLI
+        run: npm install --global @lpm-registry/cli@0.73.0 --allow-scripts=@lpm-registry/cli
+
+      - name: Cache the LPM store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.lpm/store
+          key: lpm-store-${{ runner.os }}-security-${{ hashFiles('lpm.lock') }}
+          restore-keys: lpm-store-${{ runner.os }}-security-
+
+      - name: Install dependencies
+        run: lpm ci --strict-integrity --no-skills --no-editor-setup --no-security-summary
+
+      - name: Run extended fuzzing
+        env:
+          FUZZ_RUNS: '10000'
+        run: lpm run test:fuzz
+
+  browser-fuzz:
+    name: Extended browser fuzzing (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install LPM CLI
+        run: npm install --global @lpm-registry/cli@0.73.0 --allow-scripts=@lpm-registry/cli
+
+      - name: Cache the LPM store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.lpm/store
+          key: lpm-store-${{ runner.os }}-browser-security-${{ hashFiles('lpm.lock') }}
+          restore-keys: lpm-store-${{ runner.os }}-browser-security-
+
+      - name: Install dependencies
+        run: lpm ci --strict-integrity --no-skills --no-editor-setup --no-security-summary
+
+      - name: Install browser
+        run: lpm exec playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Build the package
+        run: lpm run build
+
+      - name: Run the extended browser corpus
+        env:
+          BROWSER_FUZZ_RUNS: '1000'
+        run: lpm run test:browser -- --project=${{ matrix.browser }}

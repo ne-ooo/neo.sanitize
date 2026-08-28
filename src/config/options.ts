@@ -3,6 +3,20 @@ import { deepFreeze } from '../utils/object.js'
 
 export type ResolvedSanitizeOptions = Required<Omit<SanitizeOptions, 'hooks'>>
 
+/**
+ * Read an own data property without consulting a polluted prototype or
+ * invoking an accessor supplied by an untrusted configuration object.
+ */
+export function readOwnOption<K extends keyof SanitizeOptions>(
+  options: Partial<SanitizeOptions>,
+  key: K
+): SanitizeOptions[K] | undefined {
+  const descriptor = Object.getOwnPropertyDescriptor(options, key)
+  return descriptor && 'value' in descriptor
+    ? (descriptor.value as SanitizeOptions[K])
+    : undefined
+}
+
 function resolveLimit(value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback
   if (!Number.isFinite(value) || value < 0) return fallback
@@ -17,7 +31,8 @@ export function mergeOptions(
   base: ResolvedSanitizeOptions,
   options: Partial<SanitizeOptions> = {}
 ): ResolvedSanitizeOptions {
-  const allowedAttributes = options.allowedAttributes ?? base.allowedAttributes
+  const allowedAttributes =
+    readOwnOption(options, 'allowedAttributes') ?? base.allowedAttributes
   const clonedAttributes = Object.create(null) as Record<string, string[]>
 
   for (const tagName of Object.keys(allowedAttributes)) {
@@ -26,27 +41,53 @@ export function mergeOptions(
   }
 
   return {
-    allowedTags: [...(options.allowedTags ?? base.allowedTags)],
+    allowedTags: [...(readOwnOption(options, 'allowedTags') ?? base.allowedTags)],
     allowedAttributes: clonedAttributes,
-    allowedProtocols: [...(options.allowedProtocols ?? base.allowedProtocols)],
-    forbiddenAttributes: [...(options.forbiddenAttributes ?? base.forbiddenAttributes)],
-    allowAllAttributes: [...(options.allowAllAttributes ?? base.allowAllAttributes)],
-    allowDataAttributes: options.allowDataAttributes ?? base.allowDataAttributes,
-    allowAriaAttributes: options.allowAriaAttributes ?? base.allowAriaAttributes,
-    allowClassAttribute: options.allowClassAttribute ?? base.allowClassAttribute,
-    allowIdAttribute: options.allowIdAttribute ?? base.allowIdAttribute,
-    allowStyleAttribute: options.allowStyleAttribute ?? base.allowStyleAttribute,
-    stripTags: options.stripTags ?? base.stripTags,
-    keepTextContent: options.keepTextContent ?? base.keepTextContent,
-    lowercaseTags: options.lowercaseTags ?? base.lowercaseTags,
-    lowercaseAttributes: options.lowercaseAttributes ?? base.lowercaseAttributes,
-    returnString: options.returnString ?? base.returnString,
-    maxInputLength: resolveLimit(options.maxInputLength, base.maxInputLength),
-    maxDOMNodes: resolveLimit(options.maxDOMNodes, base.maxDOMNodes),
-    maxDOMDepth: resolveLimit(options.maxDOMDepth, base.maxDOMDepth),
-    preventDOMClobbering: options.preventDOMClobbering ?? base.preventDOMClobbering,
-    detectMXSS: options.detectMXSS ?? base.detectMXSS,
-    strictCSSValidation: options.strictCSSValidation ?? base.strictCSSValidation,
+    allowedProtocols: [
+      ...(readOwnOption(options, 'allowedProtocols') ?? base.allowedProtocols),
+    ],
+    forbiddenAttributes: [
+      ...(readOwnOption(options, 'forbiddenAttributes') ?? base.forbiddenAttributes),
+    ],
+    allowAllAttributes: [
+      ...(readOwnOption(options, 'allowAllAttributes') ?? base.allowAllAttributes),
+    ],
+    allowDataAttributes:
+      readOwnOption(options, 'allowDataAttributes') ?? base.allowDataAttributes,
+    allowAriaAttributes:
+      readOwnOption(options, 'allowAriaAttributes') ?? base.allowAriaAttributes,
+    allowClassAttribute:
+      readOwnOption(options, 'allowClassAttribute') ?? base.allowClassAttribute,
+    allowIdAttribute:
+      readOwnOption(options, 'allowIdAttribute') ?? base.allowIdAttribute,
+    allowStyleAttribute:
+      readOwnOption(options, 'allowStyleAttribute') ?? base.allowStyleAttribute,
+    allowCustomElements:
+      readOwnOption(options, 'allowCustomElements') ?? base.allowCustomElements,
+    stripTags: readOwnOption(options, 'stripTags') ?? base.stripTags,
+    keepTextContent:
+      readOwnOption(options, 'keepTextContent') ?? base.keepTextContent,
+    lowercaseTags: readOwnOption(options, 'lowercaseTags') ?? base.lowercaseTags,
+    lowercaseAttributes:
+      readOwnOption(options, 'lowercaseAttributes') ?? base.lowercaseAttributes,
+    returnString: readOwnOption(options, 'returnString') ?? base.returnString,
+    maxInputLength: resolveLimit(
+      readOwnOption(options, 'maxInputLength'),
+      base.maxInputLength
+    ),
+    maxDOMNodes: resolveLimit(
+      readOwnOption(options, 'maxDOMNodes'),
+      base.maxDOMNodes
+    ),
+    maxDOMDepth: resolveLimit(
+      readOwnOption(options, 'maxDOMDepth'),
+      base.maxDOMDepth
+    ),
+    preventDOMClobbering:
+      readOwnOption(options, 'preventDOMClobbering') ?? base.preventDOMClobbering,
+    detectMXSS: readOwnOption(options, 'detectMXSS') ?? base.detectMXSS,
+    strictCSSValidation:
+      readOwnOption(options, 'strictCSSValidation') ?? base.strictCSSValidation,
   }
 }
 

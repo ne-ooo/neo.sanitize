@@ -235,6 +235,7 @@ export const FORBIDDEN_ATTRIBUTES: readonly string[] = deepFreeze([
   'formaction', // Can redirect form submission
   'action', // Form action URL
   'data', // <object> data URL
+  'srcdoc', // Inline HTML document for <iframe>
   'ping', // <a> ping tracking
 ])
 

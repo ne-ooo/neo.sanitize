@@ -272,7 +272,7 @@ describe('Mutation XSS (mXSS) Detection', () => {
     it('walks deeply nested DOM without JavaScript recursion', () => {
       interface TestNode {
         nodeType: number
-        tagName?: string
+        localName?: string
         namespaceURI?: string
         firstChild: TestNode | null
         nextSibling: TestNode | null
@@ -287,7 +287,7 @@ describe('Mutation XSS (mXSS) Detection', () => {
       for (let index = 0; index < 10_000; index++) {
         const element: TestNode = {
           nodeType: Node.ELEMENT_NODE,
-          tagName: 'DIV',
+          localName: 'DIV',
           namespaceURI: 'http://www.w3.org/1999/xhtml',
           firstChild: null,
           nextSibling: null,

@@ -43,6 +43,7 @@ export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = deepFre
   allowClassAttribute: false, // Security: class can cause CSS collisions
   allowIdAttribute: false, // Security: id can cause DOM clobbering
   allowStyleAttribute: false, // Security: style can have CSS injection
+  allowCustomElements: false, // Custom-element upgrade can run application code
 
   // Behavior
   stripTags: false, // Keep wrappers for allowed elements

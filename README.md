@@ -233,6 +233,7 @@ interface SanitizeOptions {
   allowClassAttribute?: boolean; // Allow class attribute
   allowIdAttribute?: boolean; // Allow id attribute
   allowStyleAttribute?: boolean; // Allow style attribute
+  allowCustomElements?: boolean; // Unsafe opt-in for listed custom elements
   allowAllAttributes?: string[]; // Tags that accept attributes outside the per-tag list
 
   // Content handling
@@ -395,6 +396,10 @@ The `allowedTags` option cannot enable active-content tags. This rule also appli
 
 The `allowedTags` option cannot enable SVG, MathML, or another foreign namespace. The sanitizer supports HTML policies only.
 
+The sanitizer rejects custom elements and customized built-ins by default. An `allowedTags` entry cannot override this rule.
+
+WARNING: `allowCustomElements: true` can run application-defined lifecycle code after insertion. Do not use it for attacker-controlled HTML.
+
 URL-list attributes use per-candidate protocol checks. These attributes include `srcset`, `imagesrcset`, `ping`, and `attributionsrc`.
 
 Strict CSS mode allows listed properties only. It also removes URL and dynamic CSS functions.
@@ -421,11 +426,25 @@ Each limit is configurable. Exceeding a limit returns an empty string or empty f
 
 ## Testing
 
-The suite contains 540 automated tests across 14 files. It covers sanitizer behavior, configuration, resource limits, hooks, runtimes, and XSS regression vectors.
+The suite covers sanitizer behavior, configuration, resource limits, hooks, runtimes, public attack corpora, fuzzing, and XSS regressions.
+
+The current security matrix contains these checks:
+
+- 223 fixtures from the DOMPurify 3.4.14 corpus, pinned by commit and SHA-256.
+- Corpus checks in Chromium, Firefox, WebKit, jsdom, and happy-dom.
+- 300 deterministic fast-check runs in each standard test run.
+- 40 generated malformed inputs in each browser pull-request job.
+- 10,000 fast-check runs and 1,000 generated inputs per browser in the scheduled workflow.
+
+The tests use neo.sanitize invariants. They do not copy DOMPurify output expectations.
 
 Coverage must stay at or above 90% for statements, functions, and lines. Branch coverage must stay at or above 80%.
 
-CI tests Node.js 18, 20, and 22. A separate job checks scaling, allocation, runtime output parity, nested CSS, and URL-list short-circuiting.
+CI tests Node.js 18, 20, and 22. The happy-dom matrix runs on Node.js 20 and 22.
+
+Browser jobs run Chromium, Firefox, and WebKit.
+
+CI also checks scaling, allocation, DOM-runtime parity, nested CSS, and URL-list short-circuiting. Scheduled jobs run longer fuzz campaigns.
 
 ```bash
 # Run tests
@@ -433,6 +452,17 @@ lpm run test
 
 # Run tests with coverage gates
 lpm run test:coverage
+
+# Run the public attack corpus and DOM-runtime matrix
+lpm run test:corpus
+
+# Run deterministic property fuzzing
+lpm run test:fuzz
+
+# Build, then run Chromium, Firefox, and WebKit checks
+lpm run build
+lpm exec playwright install chromium firefox webkit
+lpm run test:browser
 
 # Run all checks required before publication
 lpm run release:check
@@ -541,7 +571,8 @@ import { createSanitizer } from "@lpm.dev/neo.sanitize";
 - ✅ **TypeScript-first** (DOMPurify has community types)
 - ✅ **Predefined schemas** for common use cases
 - ✅ **Simpler API** for most use cases
-- ⚠️ Less mature (DOMPurify is battle-tested)
+- ✅ **Security gates** use an attributed public corpus, three browser engines, two server DOM runtimes, and mutation fuzzing
+- ⚠️ Younger than DOMPurify
 
 ### vs sanitize-html
 

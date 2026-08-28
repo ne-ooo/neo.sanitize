@@ -46,12 +46,23 @@ export const DANGEROUS_TAGS: readonly string[] = deepFreeze([
   'meta',
   'noscript',
   'template',
+  'selectedcontent',
+  'svg',
+  'math',
   'frameset',
   'frame',
   'noframes',
 ])
 
 const DANGEROUS_TAG_SET = new Set(DANGEROUS_TAGS)
+
+/**
+ * Return true for custom-element-like names. The broad hyphen check also
+ * rejects reserved or future custom-element names by default.
+ */
+export function isCustomElementNameNormalized(tagName: string): boolean {
+  return tagName.includes('-')
+}
 
 /**
  * Check an already-normalized tag name against the invariant blocklist.
@@ -91,14 +102,18 @@ export function normalizeTagName(tagName: string): string {
  */
 export function isTagAllowed(
   tagName: string,
-  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS
+  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS,
+  allowCustomElements = false
 ): boolean {
   const normalized = normalizeTagName(tagName)
 
   // Active-content tags are a security invariant, not a configurable
   // allowlist choice. Keeping this check here protects every caller of the
   // tag validator, including the core sanitizer and custom schemas.
-  if (isDangerousTag(normalized)) {
+  if (
+    isDangerousTag(normalized) ||
+    (!allowCustomElements && isCustomElementNameNormalized(normalized))
+  ) {
     return false
   }
 
@@ -145,7 +160,8 @@ export function isDangerousTag(tagName: string): boolean {
  */
 export function validateTag(
   tagName: string,
-  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS
+  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS,
+  allowCustomElements = false
 ): TagValidationResult {
   const normalized = normalizeTagName(tagName)
 
@@ -154,6 +170,14 @@ export function validateTag(
       allowed: false,
       tagName: normalized,
       reason: `Dangerous tag: ${normalized}`,
+    }
+  }
+
+  if (!allowCustomElements && isCustomElementNameNormalized(normalized)) {
+    return {
+      allowed: false,
+      tagName: normalized,
+      reason: `Custom element disabled: ${normalized}`,
     }
   }
 
@@ -192,11 +216,14 @@ export function validateTag(
  */
 export function filterAllowedTags(
   tagNames: string[],
-  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS
+  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS,
+  allowCustomElements = false
 ): string[] {
   return tagNames
     .map(normalizeTagName)
-    .filter((tagName) => isTagAllowed(tagName, allowedTags))
+    .filter((tagName) =>
+      isTagAllowed(tagName, allowedTags, allowCustomElements)
+    )
 }
 
 /**
