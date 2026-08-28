@@ -25,6 +25,7 @@
 // Main sanitization functions
 export {
   sanitize,
+  sanitizeToTrustedHTML,
   compileSanitizeOptions,
   createSanitizer,
   sanitizeBasic,
@@ -98,6 +99,8 @@ export type {
   CompiledSanitizeOptions,
   DOMParserLike,
   DOMRuntime,
+  TrustedHTMLLike,
+  TrustedTypePolicyLike,
   SanitizeSchema,
   SanitizeResult,
   Sanitizer,

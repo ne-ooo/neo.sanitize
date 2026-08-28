@@ -6,6 +6,7 @@
 
 export {
   sanitize,
+  sanitizeToTrustedHTML,
   compileSanitizeOptions,
   createSanitizer,
   sanitizeBasic,
@@ -18,4 +19,6 @@ export type {
   DOMParserLike,
   DOMRuntime,
   HTMLInsertionContext,
+  TrustedHTMLLike,
+  TrustedTypePolicyLike,
 } from '../types.js'

@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Added browser-engine, DOM-runtime, parser-context, and property-fuzz checks.
 - Added context-aware parsing for ordinary, table, and select insertion targets.
 - Added shrinkable structural differential fuzzing and corpus-seeded malformed context mutations across five DOM implementations.
+- Added `sanitizeToTrustedHTML()` for browser applications that enforce Trusted Types.
 - Added test coverage gates for statements, branches, functions, and lines.
 - Added package checks for public exports, skill versions, required files, and the bundle budget.
 - Added CI checks for Node.js 18, 20, and 22.
@@ -64,6 +65,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Scalar URL validation now avoids temporary candidate arrays and result objects.
 - Benchmarks now cover scaling, compiled policies, hostile wrappers, nested CSS functions, and large URL lists.
 - CI now checks output parity, scaling ratios, allocation ratios, nested CSS, and URL-list short-circuiting.
+- DOM traversal now captures validated node, attribute, and parser operations once for each runtime.
+- A one-time sibling probe removes repeated compatibility checks from compliant runtimes.
 
 ### Changed
 

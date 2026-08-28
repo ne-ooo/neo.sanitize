@@ -61,7 +61,7 @@ function assertBundleBudget() {
   const esmEntry = readFileSync(resolvePackagePath(manifest.module))
   const compressedBytes = gzipSync(esmEntry, { level: 9 }).byteLength
   const maximumCompressedBytes = 15 * 1024
-  const maximumRawBytes = 36 * 1024
+  const maximumRawBytes = 41 * 1024
   const distributionBytes = getDirectorySize(resolve(packageRoot, 'dist'))
   const maximumDistributionBytes = 350 * 1024
 
@@ -109,6 +109,7 @@ function createRuntime() {
 function assertSanitizer(module, runtime) {
   const input = '<script>alert(1)</script><p onclick="alert(1)">Safe</p>'
   assert.equal(module.sanitize(input, {}, runtime), '<p>Safe</p>')
+  assert.equal(typeof module.sanitizeToTrustedHTML, 'function')
 }
 
 assert.equal(Object.keys(manifest.dependencies ?? {}).length, 0, 'Runtime dependencies are not allowed')

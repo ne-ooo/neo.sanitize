@@ -12,17 +12,26 @@ import type {
 } from '../types.js'
 import {
   appendNode,
+  captureDOMMethod,
   cloneDOMNode,
   createDocumentFragment,
   createElement,
   getDocumentBody,
+  getElementHTML,
   getLastChild,
   getOwnerDocument,
   setElementHTML,
+  withDOMIntrinsics,
 } from '../utils/dom.js'
 import { resolveInsertionContext } from '../utils/context.js'
+import type { TrustedHTMLAdapter } from '../utils/trusted-types.js'
 
-const PARSER_CACHE = new WeakMap<DOMRuntime['DOMParser'], DOMParserLike>()
+interface CapturedParser {
+  parser: DOMParserLike
+  parseFromString: Function
+}
+
+const PARSER_CACHE = new WeakMap<DOMRuntime['DOMParser'], CapturedParser>()
 let cachedGlobalDocument: Document | undefined
 let cachedGlobalParser: DOMRuntime['DOMParser'] | undefined
 let cachedGlobalRuntime: DOMRuntime | undefined
@@ -103,7 +112,9 @@ export function parseHTML(
   insertionContext: HTMLInsertionContext = 'body'
 ): DocumentFragment {
   const dom = resolveDOMRuntime(runtime)
-  return parseHTMLWithRuntime(html, dom, insertionContext)
+  return withDOMIntrinsics(dom.document, () =>
+    parseHTMLWithRuntime(html, dom, insertionContext)
+  )
 }
 
 /**
@@ -153,36 +164,56 @@ export function parseHTMLWithRuntime(
 export function parseHTMLContextWithRuntime(
   html: string,
   dom: DOMRuntime,
-  insertionContext: HTMLInsertionContext = 'body'
+  insertionContext: HTMLInsertionContext = 'body',
+  trustedHTML?: TrustedHTMLAdapter
 ): HTMLElement {
   const context = resolveInsertionContext(insertionContext, 'body')
-  const parsedDocument = parseDocumentWithRuntime('', dom)
+  const parsedDocument = parseDocumentWithRuntime(
+    trustedHTML ? trustedHTML.createHTML('') : '',
+    dom
+  )
   const source =
     context === 'body'
       ? (getDocumentBody(parsedDocument) as HTMLBodyElement)
       : createElement(parsedDocument, context)
 
-  setElementHTML(source, html)
+  setElementHTML(source, trustedHTML ? trustedHTML.createHTML(html) : html)
   return source as HTMLElement
 }
 
 /**
  * Parse HTML into a document with a previously resolved runtime.
  */
-export function parseDocumentWithRuntime(html: string, dom: DOMRuntime): Document {
-  let parser = PARSER_CACHE.get(dom.DOMParser)
-  if (!parser) {
-    parser = new dom.DOMParser()
-    PARSER_CACHE.set(dom.DOMParser, parser)
+export function parseDocumentWithRuntime(
+  html: string | object,
+  dom: DOMRuntime
+): Document {
+  let captured = PARSER_CACHE.get(dom.DOMParser)
+  if (!captured) {
+    const parser = new dom.DOMParser()
+    captured = {
+      parser,
+      parseFromString: captureDOMMethod(parser, 'parseFromString'),
+    }
+    PARSER_CACHE.set(dom.DOMParser, captured)
   }
 
   let parsedDocument: Document
   try {
-    parsedDocument = parser.parseFromString(html, 'text/html')
+    parsedDocument = Reflect.apply(captured.parseFromString, captured.parser, [
+      html,
+      'text/html',
+    ]) as Document
   } catch (cause) {
     throw new Error('@lpm.dev/neo.sanitize: The DOM runtime failed to parse the HTML input.', {
       cause,
     })
+  }
+
+  if (parsedDocument === dom.document) {
+    throw new TypeError(
+      '@lpm.dev/neo.sanitize: The DOM runtime parser returned the live runtime document.'
+    )
   }
 
   if (!parsedDocument || !getDocumentBody(parsedDocument)) {
@@ -204,9 +235,11 @@ export function serializeHTML(fragment: DocumentFragment): string {
     throw new Error('@lpm.dev/neo.sanitize: Cannot serialize a fragment without an owner document.')
   }
 
-  const container = createElement(ownerDocument, 'div')
-  appendNode(container, cloneDOMNode(fragment, true))
-  return container.innerHTML
+  return withDOMIntrinsics(ownerDocument, () => {
+    const container = createElement(ownerDocument, 'div')
+    appendNode(container, cloneDOMNode(fragment, true))
+    return getElementHTML(container)
+  })
 }
 
 /**
@@ -219,7 +252,9 @@ export function consumeAndSerializeHTML(fragment: DocumentFragment): string {
     throw new Error('@lpm.dev/neo.sanitize: Cannot serialize a fragment without an owner document.')
   }
 
-  const container = createElement(ownerDocument, 'div')
-  appendNode(container, fragment)
-  return container.innerHTML
+  return withDOMIntrinsics(ownerDocument, () => {
+    const container = createElement(ownerDocument, 'div')
+    appendNode(container, fragment)
+    return getElementHTML(container)
+  })
 }

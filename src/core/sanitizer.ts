@@ -9,6 +9,8 @@ import type {
   SanitizeHooks,
   SanitizeOptions,
   Sanitizer,
+  TrustedHTMLLike,
+  TrustedTypePolicyLike,
 } from '../types.js'
 import { DEFAULT_OPTIONS } from '../config/defaults.js'
 import { mergeOptions, readOwnOption, snapshotOptions } from '../config/options.js'
@@ -30,9 +32,15 @@ import { isForeignNamespace, sanitizeMXSS } from '../validators/mxss.js'
 import {
   appendNode,
   cloneDOMNode,
+  copyChildNodes,
   createDocumentFragment,
+  getAttributeAt,
+  getAttributeMapLength,
+  getAttributeName,
+  getAttributeValue,
   getChildNodes,
   getElementAttributes,
+  getElementHTML,
   getElementLocalName,
   getFirstChild,
   getLastChild,
@@ -40,12 +48,19 @@ import {
   getNodeType,
   getOwnerDocument,
   getParentNode,
+  hasReliableDOMSiblingTraversal,
   hasElementAttribute,
   insertBeforeNode,
   removeElementAttribute,
   removeNode,
   setElementAttribute,
+  withDOMIntrinsics,
 } from '../utils/dom.js'
+import {
+  createTrustedHTMLAdapter,
+  TrustedTypesIntegrationError,
+} from '../utils/trusted-types.js'
+import type { TrustedHTMLAdapter } from '../utils/trusted-types.js'
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
@@ -90,6 +105,9 @@ const COMPILED_CONFIGS = new WeakSet<object>()
  */
 function createChildCursor(parent: Node): ChildCursor {
   const child = getFirstChild(parent)
+  if (hasReliableDOMSiblingTraversal()) {
+    return { child, fallbackChildren: undefined, fallbackIndex: -1 }
+  }
   if (
     child &&
     getNextSibling(child) === null &&
@@ -98,7 +116,7 @@ function createChildCursor(parent: Node): ChildCursor {
     const childNodes = getChildNodes(parent)
     return {
       child,
-      fallbackChildren: Array.from(childNodes),
+      fallbackChildren: copyChildNodes(childNodes),
       fallbackIndex: 0,
     }
   }
@@ -211,15 +229,65 @@ export function sanitize(
   )
 }
 
-function isRejectedElement(
-  element: Element,
+/**
+ * Sanitize HTML and return the caller policy's exact TrustedHTML type.
+ *
+ * The policy must be an identity policy. It is used only for inert parsing and
+ * for wrapping the final sanitized output under Trusted Types enforcement.
+ */
+export function sanitizeToTrustedHTML<TTrustedHTML extends TrustedHTMLLike>(
+  html: string,
+  trustedTypesPolicy: TrustedTypePolicyLike<TTrustedHTML>,
+  options: Partial<SanitizeOptions> = EMPTY_OPTIONS,
+  runtime?: DOMRuntime
+): TTrustedHTML {
+  const config = resolveOptions(options)
+  if (!config.returnString) {
+    throw new TrustedTypesIntegrationError(
+      'sanitizeToTrustedHTML() does not support returnString: false.'
+    )
+  }
+
+  const dom = resolveDOMRuntime(runtime)
+  const trustedHTML = createTrustedHTMLAdapter(
+    trustedTypesPolicy,
+    dom.document
+  )
+  const result = sanitizeWithPolicy(
+    html,
+    getPolicy(config),
+    readOwnOption(options, 'hooks'),
+    dom,
+    trustedHTML
+  )
+  if (typeof result !== 'string') {
+    throw new TrustedTypesIntegrationError(
+      'sanitizeToTrustedHTML() did not produce a string result.'
+    )
+  }
+
+  return trustedHTML.createHTML(result)
+}
+
+function isRejectedElementName(
   tagName: string,
   config: ResolvedSanitizeOptions
 ): boolean {
   return (
     isDangerousTagNormalized(tagName) ||
-    (!config.allowCustomElements &&
-      (isCustomElementNameNormalized(tagName) || hasElementAttribute(element, 'is')))
+    (!config.allowCustomElements && isCustomElementNameNormalized(tagName))
+  )
+}
+
+function isCustomizedBuiltIn(
+  element: Element,
+  attributes: NamedNodeMap,
+  config: ResolvedSanitizeOptions
+): boolean {
+  return (
+    !config.allowCustomElements &&
+    getAttributeMapLength(attributes) > 0 &&
+    hasElementAttribute(element, 'is')
   )
 }
 
@@ -227,7 +295,8 @@ function sanitizeWithPolicy(
   html: string,
   policy: SanitizationPolicy,
   hooks: SanitizeHooks | undefined,
-  runtime: DOMRuntime | undefined
+  runtime: DOMRuntime | undefined,
+  trustedHTML?: TrustedHTMLAdapter
 ): string | DocumentFragment {
   const config = policy.config
 
@@ -274,6 +343,25 @@ function sanitizeWithPolicy(
   }
 
   const dom = resolveDOMRuntime(runtime)
+  return withDOMIntrinsics(dom.document, () =>
+    sanitizeWithResolvedDOM(
+      processedHtml,
+      policy,
+      hooks,
+      dom,
+      trustedHTML
+    )
+  )
+}
+
+function sanitizeWithResolvedDOM(
+  processedHtml: string,
+  policy: SanitizationPolicy,
+  hooks: SanitizeHooks | undefined,
+  dom: DOMRuntime,
+  trustedHTML?: TrustedHTMLAdapter
+): string | DocumentFragment {
+  const config = policy.config
   const useDirectStringPath =
     config.returnString &&
     !config.detectMXSS &&
@@ -287,13 +375,21 @@ function sanitizeWithPolicy(
       parsedSource = parseHTMLContextWithRuntime(
         processedHtml,
         dom,
-        config.insertionContext
+        config.insertionContext,
+        trustedHTML
       )
-    } catch {
+    } catch (cause) {
+      if (trustedHTML) {
+        if (cause instanceof TrustedTypesIntegrationError) throw cause
+        throw new TrustedTypesIntegrationError(
+          'Trusted Types protected parsing failed.',
+          { cause }
+        )
+      }
       return ''
     }
     if (!sanitizeNodeInPlace(parsedSource, policy)) return ''
-    return parsedSource.innerHTML
+    return getElementHTML(parsedSource)
   }
 
   let parsedSource: HTMLElement
@@ -301,9 +397,17 @@ function sanitizeWithPolicy(
     parsedSource = parseHTMLContextWithRuntime(
       processedHtml,
       dom,
-      config.insertionContext
+      config.insertionContext,
+      trustedHTML
     )
-  } catch {
+  } catch (cause) {
+    if (trustedHTML) {
+      if (cause instanceof TrustedTypesIntegrationError) throw cause
+      throw new TrustedTypesIntegrationError(
+        'Trusted Types protected parsing failed.',
+        { cause }
+      )
+    }
     return config.returnString ? '' : createDocumentFragment(dom.document)
   }
 
@@ -346,7 +450,7 @@ function sanitizeWithPolicy(
   let stabilizedSerialization: string | undefined
   if (config.detectMXSS) {
     sanitizeMXSS(finalFragment, true)
-    const stabilized = stabilizeMXSS(finalFragment, policy, dom)
+    const stabilized = stabilizeMXSS(finalFragment, policy, dom, trustedHTML)
     finalFragment = stabilized.fragment
     stabilizedSerialization = stabilized.serialized
   }
@@ -819,8 +923,13 @@ function sanitizeNodeInPlace(
       const tagName = getElementLocalName(element).toLowerCase()
       if (
         isForeignNamespace(element, tagName) ||
-        isRejectedElement(element, tagName, config)
+        isRejectedElementName(tagName, config)
       ) {
+        removeNode(element)
+        continue
+      }
+      const attributes = getElementAttributes(element)
+      if (isCustomizedBuiltIn(element, attributes, config)) {
         removeNode(element)
         continue
       }
@@ -866,7 +975,7 @@ function sanitizeNodeInPlace(
         }
         continue
       }
-      sanitizeAttributes(element, tagName, policy)
+      sanitizeAttributes(element, tagName, policy, undefined, attributes)
       stack.push({
         ...createChildCursor(element),
         depth: frame.depth + 1,
@@ -931,8 +1040,13 @@ function buildSanitizedFragment(
       // xlink:href to bypass the HTML URL policy.
       if (
         isForeignNamespace(element, tagName) ||
-        isRejectedElement(element, tagName, config)
+        isRejectedElementName(tagName, config)
       ) {
+        removeNode(element)
+        continue
+      }
+      const attributes = getElementAttributes(element)
+      if (isCustomizedBuiltIn(element, attributes, config)) {
         removeNode(element)
         continue
       }
@@ -957,7 +1071,7 @@ function buildSanitizedFragment(
         }
       }
 
-      sanitizeAttributes(element, tagName, policy, hooks)
+      sanitizeAttributes(element, tagName, policy, hooks, attributes)
       if (config.stripTags) {
         stack.push({
           ...createChildCursor(element),
@@ -990,20 +1104,25 @@ function sanitizeAttributes(
   element: Element,
   tagName: string,
   policy: SanitizationPolicy,
-  hooks?: SanitizeHooks
+  hooks?: SanitizeHooks,
+  attributes: NamedNodeMap = getElementAttributes(element)
 ): void {
   if (hooks?.onAttribute) {
-    const attributes = Array.from(getElementAttributes(element))
-    for (const attr of attributes) {
+    const attributeSnapshot: Attr[] = []
+    const attributeCount = getAttributeMapLength(attributes)
+    for (let index = 0; index < attributeCount; index++) {
+      const attribute = getAttributeAt(attributes, index)
+      if (attribute) attributeSnapshot.push(attribute)
+    }
+    for (const attr of attributeSnapshot) {
       sanitizeAttribute(element, tagName, attr, policy, hooks)
     }
     return
   }
 
   let index = 0
-  const attributes = getElementAttributes(element)
-  while (index < attributes.length) {
-    const attr = attributes.item(index)
+  while (index < getAttributeMapLength(attributes)) {
+    const attr = getAttributeAt(attributes, index)
     if (!attr) break
 
     const removed = sanitizeAttribute(element, tagName, attr, policy)
@@ -1019,13 +1138,16 @@ function sanitizeAttribute(
   hooks?: SanitizeHooks
 ): boolean {
   const config = policy.config
-  const attrName = config.lowercaseAttributes ? attr.name.toLowerCase() : attr.name
-  const attrValue = attr.value
+  const sourceAttrName = getAttributeName(attr)
+  const attrName = config.lowercaseAttributes
+    ? sourceAttrName.toLowerCase()
+    : sourceAttrName
+  const attrValue = getAttributeValue(attr)
 
   if (hooks?.onAttribute) {
     const hookResult = hooks.onAttribute(element, attrName, attrValue)
     if (hookResult === false) {
-      removeElementAttribute(element, attr.name)
+      removeElementAttribute(element, sourceAttrName)
       return true
     }
   }
@@ -1040,12 +1162,12 @@ function sanitizeAttribute(
   )
 
   if (!validation.allowed) {
-    removeElementAttribute(element, attr.name)
+    removeElementAttribute(element, sourceAttrName)
     return true
   }
 
   if (validation.sanitizedValue !== undefined) {
-    setElementAttribute(element, attr.name, validation.sanitizedValue)
+    setElementAttribute(element, sourceAttrName, validation.sanitizedValue)
   }
   return false
 }
@@ -1058,7 +1180,8 @@ function sanitizeAttribute(
 function stabilizeMXSS(
   fragment: DocumentFragment,
   policy: SanitizationPolicy,
-  runtime: DOMRuntime
+  runtime: DOMRuntime,
+  trustedHTML?: TrustedHTMLAdapter
 ): StabilizedMXSS {
   let serialized = serializeHTML(fragment)
 
@@ -1068,7 +1191,8 @@ function stabilizeMXSS(
       const parsedSource = parseHTMLContextWithRuntime(
         serialized,
         runtime,
-        policy.config.insertionContext
+        policy.config.insertionContext,
+        trustedHTML
       )
       sanitized = buildSanitizedFragment(
         parsedSource,
@@ -1076,7 +1200,14 @@ function stabilizeMXSS(
         undefined,
         runtime.document
       )
-    } catch {
+    } catch (cause) {
+      if (trustedHTML) {
+        if (cause instanceof TrustedTypesIntegrationError) throw cause
+        throw new TrustedTypesIntegrationError(
+          'Trusted Types protected mXSS stabilization failed.',
+          { cause }
+        )
+      }
       return {
         fragment: createDocumentFragment(runtime.document),
         serialized: '',

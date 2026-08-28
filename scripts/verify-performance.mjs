@@ -175,6 +175,8 @@ console.log(
     cleanScalingRatio: ratio(cleanLargeMs, cleanSmallMs),
     deniedWrapperTimeRatio: ratio(wrappedMs, cleanLargeMs),
     deniedWrapperHeapRatio: ratio(wrappedHeap, cleanHeap),
+    contextualSmallMilliseconds: contextualSmallMs,
+    contextualLargeMilliseconds: contextualLargeMs,
     contextualScalingRatio: ratio(contextualLargeMs, contextualSmallMs),
     nestedCSSRatio: ratio(nestedCSSMs, flatCSSMs),
     rawTextPreflightRatio: ratio(deepPreflightMs, flatPreflightMs),
