@@ -91,6 +91,7 @@ export {
   ARIA_ATTRIBUTE_REGEX,
 } from './utils/constants.js'
 export { HTML_INSERTION_CONTEXTS } from './utils/context.js'
+export { SANITIZER_VERSION } from './version.js'
 
 // TypeScript types
 export type {

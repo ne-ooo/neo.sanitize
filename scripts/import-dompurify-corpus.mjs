@@ -1,69 +1,47 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import {
+  createDOMPurifyCorpus,
+  getSHA256,
+  parseDOMPurifyFixtures,
+} from './lib/dompurify-corpus.mjs'
 
-const SOURCE_COMMIT = '1a49d19d1f57f67e263a3c6213faf7b4e9db8d7a'
-const SOURCE_VERSION = '3.4.14'
-const SOURCE_SHA256 = '1c8f8dad1874fcd375665070a8e2be8e011b63a6d6b2ce27ab08585e324eef75'
-const sourcePath = process.argv[2]
-const outputPath = process.argv[3] ?? 'test/corpus/dompurify-v3.4.14.json'
+const [sourcePath, version, commit, expectedSHA256, requestedOutputPath] =
+  process.argv.slice(2)
 
-if (!sourcePath) {
+if (!sourcePath || !version || !commit || !expectedSHA256) {
   throw new Error(
-    'Usage: node scripts/import-dompurify-corpus.mjs <expect.mjs> [output.json]'
+    'Usage: node scripts/import-dompurify-corpus.mjs <expect.mjs> <version> <commit> <sha256> [output.json]'
   )
 }
 
-const absoluteSource = resolve(sourcePath)
-const source = await readFile(absoluteSource, 'utf8')
-const sourceSHA256 = createHash('sha256').update(source).digest('hex')
-if (sourceSHA256 !== SOURCE_SHA256) {
+if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(version)) {
+  throw new TypeError('The DOMPurify version is invalid.')
+}
+if (!/^[0-9a-f]{40}$/u.test(commit)) {
+  throw new TypeError('The DOMPurify commit must be a full lowercase SHA-1.')
+}
+if (!/^[0-9a-f]{64}$/u.test(expectedSHA256)) {
+  throw new TypeError('The DOMPurify source checksum must be a lowercase SHA-256.')
+}
+
+const source = await readFile(resolve(sourcePath), 'utf8')
+const sourceSHA256 = getSHA256(source)
+if (sourceSHA256 !== expectedSHA256) {
   throw new Error(
-    `The DOMPurify fixture checksum did not match commit ${SOURCE_COMMIT}.`
+    `The DOMPurify fixture checksum did not match commit ${commit}.`
   )
 }
-const imported = await import(pathToFileURL(absoluteSource).href)
-const fixtures = imported.default
 
-if (!Array.isArray(fixtures)) {
-  throw new TypeError('The DOMPurify fixture module must have a default array export.')
-}
-
-const cases = fixtures.map((fixture, index) => {
-  if (
-    typeof fixture !== 'object' ||
-    fixture === null ||
-    typeof fixture.payload !== 'string'
-  ) {
-    throw new TypeError(`Invalid DOMPurify fixture at index ${index}.`)
-  }
-
-  return {
-    id: `dompurify-${String(index + 1).padStart(3, '0')}`,
-    title:
-      typeof fixture.title === 'string'
-        ? fixture.title
-        : `Untitled fixture ${index + 1}`,
-    payload: fixture.payload,
-  }
+const fixtures = parseDOMPurifyFixtures(source)
+const corpus = createDOMPurifyCorpus({
+  fixtures,
+  version,
+  commit,
+  sha256: sourceSHA256,
 })
-
-const corpus = {
-  source: {
-    project: 'DOMPurify',
-    repository: 'https://github.com/cure53/DOMPurify',
-    file: 'test/fixtures/expect.mjs',
-    version: SOURCE_VERSION,
-    commit: SOURCE_COMMIT,
-    sha256: SOURCE_SHA256,
-    license: 'Apache-2.0',
-  },
-  modification:
-    'neo.sanitize retained fixture payloads and available titles. It added stable labels for untitled fixtures, removed DOMPurify-specific expected output, and checks neo.sanitize security invariants.',
-  caseCount: cases.length,
-  cases,
-}
+const outputPath =
+  requestedOutputPath ?? `test/corpus/dompurify-v${version}.json`
 
 await writeFile(resolve(outputPath), `${JSON.stringify(corpus, null, 2)}\n`)
-console.log(`Wrote ${cases.length} cases to ${outputPath}.`)
+console.log(`Wrote ${fixtures.length} cases to ${outputPath}.`)

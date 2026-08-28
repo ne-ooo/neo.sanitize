@@ -1,0 +1,80 @@
+name: Update DOMPurify corpus
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: DOMPurify release tag. Leave empty to use the latest release.
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dompurify-corpus-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the reviewed corpus
+    if: github.repository == 'ne-ooo/neo.sanitize'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Install LPM CLI
+        run: npm install --global @lpm-registry/cli@0.76.5 --allow-scripts=@lpm-registry/cli
+
+      - name: Install dependencies
+        run: lpm ci --strict-integrity --no-skills --no-editor-setup --no-security-summary
+
+      - name: Update the corpus
+        id: corpus
+        env:
+          DOMPURIFY_VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/update-dompurify-corpus.mjs
+
+      - name: Run the corpus checks
+        if: steps.corpus.outputs.changed == 'true'
+        run: lpm run test:corpus
+
+      - name: Open or update the corpus pull request
+        if: steps.corpus.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORPUS_VERSION: ${{ steps.corpus.outputs.version }}
+          CORPUS_COMMIT: ${{ steps.corpus.outputs.commit }}
+          CORPUS_CASE_COUNT: ${{ steps.corpus.outputs.case_count }}
+        run: |
+          branch="automation/dompurify-corpus-${CORPUS_VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
+          git switch --force-create "$branch"
+          git add test/corpus test/runtime-matrix.test.ts test/security/dompurify-corpus.test.ts test/differential/arbitraries.ts test/fuzz/sanitize.fast-check.test.ts test/browser/security.spec.ts
+          git commit -m "Update DOMPurify corpus to ${CORPUS_VERSION}"
+          git push --force-with-lease origin "$branch"
+
+          pr_number="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')"
+          body="DOMPurify ${CORPUS_VERSION} is pinned at ${CORPUS_COMMIT}. The imported corpus contains ${CORPUS_CASE_COUNT} cases. Review upstream changes before merge."
+          if [ -n "$pr_number" ]; then
+            gh pr edit "$pr_number" --title "Update DOMPurify corpus to ${CORPUS_VERSION}" --body "$body"
+          else
+            gh pr create --base main --head "$branch" --title "Update DOMPurify corpus to ${CORPUS_VERSION}" --body "$body"
+          fi
+
+          gh workflow run ci.yml --ref "$branch"

@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -27,7 +27,7 @@ jobs:
         run: npm install --global @lpm-registry/cli@0.76.5 --allow-scripts=@lpm-registry/cli
 
       - name: Cache the LPM store
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.lpm/store
           key: lpm-store-${{ runner.os }}-security-${{ hashFiles('lpm.lock') }}
@@ -36,12 +36,31 @@ jobs:
       - name: Install dependencies
         run: lpm ci --strict-integrity --no-skills --no-editor-setup --no-security-summary
 
-      - name: Run extended fuzzing
+      - name: Write fuzz metadata
         env:
           FUZZ_RUNS: '10000'
           DIFFERENTIAL_FUZZ_RUNS: '10000'
           ADVERSARIAL_CONTEXT_FUZZ_RUNS: '2000'
-        run: lpm run test:fuzz
+        run: node scripts/write-security-metadata.mjs security-artifacts/fuzz/metadata.json fuzz
+
+      - name: Run extended fuzzing
+        id: fuzz
+        env:
+          FUZZ_RUNS: '10000'
+          DIFFERENTIAL_FUZZ_RUNS: '10000'
+          ADVERSARIAL_CONTEXT_FUZZ_RUNS: '2000'
+        run: |
+          set -o pipefail
+          lpm run test:fuzz 2>&1 | tee security-artifacts/fuzz/output.log
+
+      - name: Upload fuzz failure
+        if: failure() && steps.fuzz.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: security-artifacts/fuzz
+          if-no-files-found: error
+          retention-days: 30
 
   browser-fuzz:
     name: Extended browser fuzzing (${{ matrix.browser }})
@@ -54,10 +73,10 @@ jobs:
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -65,7 +84,7 @@ jobs:
         run: npm install --global @lpm-registry/cli@0.76.5 --allow-scripts=@lpm-registry/cli
 
       - name: Cache the LPM store
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.lpm/store
           key: lpm-store-${{ runner.os }}-browser-security-${{ hashFiles('lpm.lock') }}
@@ -80,8 +99,29 @@ jobs:
       - name: Build the package
         run: lpm run build
 
-      - name: Run the extended browser corpus
+      - name: Write browser fuzz metadata
         env:
           BROWSER_FUZZ_RUNS: '1000'
           BROWSER_DIFFERENTIAL_RUNS: '1000'
-        run: lpm run test:browser -- --project=${{ matrix.browser }}
+        run: node scripts/write-security-metadata.mjs security-artifacts/browser/metadata.json browser-${{ matrix.browser }}
+
+      - name: Run the extended browser corpus
+        id: browser_fuzz
+        env:
+          BROWSER_FUZZ_RUNS: '1000'
+          BROWSER_DIFFERENTIAL_RUNS: '1000'
+        run: |
+          set -o pipefail
+          lpm run test:browser -- --project=${{ matrix.browser }} 2>&1 | tee security-artifacts/browser/output.log
+
+      - name: Upload browser fuzz failure
+        if: failure() && steps.browser_fuzz.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-fuzz-failure-${{ matrix.browser }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            security-artifacts/browser
+            test-results
+            playwright-report
+          if-no-files-found: error
+          retention-days: 30

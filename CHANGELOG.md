@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-28
+
+This security release expands parser coverage, fail-closed limits, browser testing, Trusted Types integration, and runtime-prototype defenses.
+
 ### Added
 
 - Added a version-pinned public attack corpus with Apache-2.0 attribution.
@@ -13,10 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Added context-aware parsing for ordinary, table, and select insertion targets.
 - Added shrinkable structural differential fuzzing and corpus-seeded malformed context mutations across five DOM implementations.
 - Added `sanitizeToTrustedHTML()` for browser applications that enforce Trusted Types.
+- Added `SANITIZER_VERSION` for logs, security reports, and runtime diagnostics.
+- Added a weekly DOMPurify corpus update workflow that opens reviewable pull requests.
+- Added 30-day fuzz failure artifacts with sanitizer, source, corpus, runtime, run-count, and failure-log metadata.
 - Added test coverage gates for statements, branches, functions, and lines.
 - Added package checks for public exports, skill versions, required files, and the bundle budget.
 - Added CI checks for Node.js 18, 20, and 22.
-- Added the MIT license and a private vulnerability reporting policy.
+- Added the MIT license and a private vulnerability reporting and response process.
 
 ### Security
 
@@ -47,6 +54,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Shared policies are deeply frozen. `getConfig()` returns frozen copies.
 - Foreign namespaces stay blocked during experimental mXSS stabilization.
 - The experimental mXSS mode now requires stable output after reparsing.
+- Trusted Types now protect the initial parser, contextual parser, mXSS parser, and final HTML sink.
+- TrustedHTML values are validated by the explicit browser runtime realm.
+- Captured attribute and parser operations prevent post-capture prototype changes from preserving active content.
+- The sanitizer rejects a parser that returns the live runtime document.
 
 ### Performance
 
@@ -76,6 +87,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Documentation now reports the measured bundle size and current test count.
 - Inline-style guidance now distinguishes XSS/resource filtering from layout isolation.
 - Builds are minified without published source maps, and release checks enforce raw entry and total distribution budgets.
+- GitHub Actions now use Node 24 action runtimes to remove Node runtime deprecation warnings.
+- DOMPurify corpus imports now parse static data without executing the upstream fixture module.
 
 ## [1.0.0] - 2026-03-19
 

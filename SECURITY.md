@@ -70,15 +70,27 @@ A scheduled workflow runs longer mutation campaigns. Fast-check reports a seed a
 
 Add each minimized failure to a deterministic regression test. Do not rely only on the saved fast-check seed.
 
-The current external corpus comes from DOMPurify 3.4.14. See `test/corpus/THIRD_PARTY_NOTICES.md` for its source and license.
+The external corpus metadata includes the DOMPurify version, release commit, source SHA-256, and case count.
 
-Use this command to update the imported corpus from a reviewed DOMPurify checkout:
+The weekly update workflow opens a pull request when DOMPurify publishes a new release. The workflow also starts the full CI matrix.
+
+A maintainer must review upstream changes before merge.
+
+Use this command to compare the repository with the latest DOMPurify release:
 
 ```bash
-node scripts/import-dompurify-corpus.mjs /path/to/DOMPurify/test/fixtures/expect.mjs
+lpm run corpus:update
 ```
 
-Update the pinned version, commit, notice, and fixture count in the same change.
+Set `DOMPURIFY_VERSION` to import a specific release tag.
+
+Use this command to import a fixture from a reviewed local checkout:
+
+```bash
+node scripts/import-dompurify-corpus.mjs /path/to/expect.mjs 3.4.14 <commit> <sha256>
+```
+
+The import parser does not execute the upstream fixture module.
 
 ### Resource Limits
 
@@ -102,6 +114,40 @@ The package does not protect a JavaScript realm that an attacker already control
 | --- | --- |
 | 1.x | Yes |
 | Earlier versions | No |
+
+## Vulnerability Response
+
+The private GitHub advisory is the record for each vulnerability report.
+
+The response targets are:
+
+- Acknowledge the report within three business days.
+- Complete the first severity assessment within seven business days.
+- Give the reporter a status update at least every seven days.
+- Publish the correction as soon as coordinated disclosure permits.
+
+These targets are service targets. Complex browser behavior can require more investigation.
+
+### Response Procedure
+
+1. Create or update the private advisory.
+2. Reproduce the report on a supported version.
+3. Record the affected sinks, runtimes, options, and browser engines.
+4. Assign a severity with CVSS and document the attack requirements.
+5. Develop the correction in the advisory private fork.
+6. Add a minimized regression case before release.
+7. Run the release, corpus, fuzz, browser, package, and performance checks.
+8. Request review from a maintainer who did not write the correction.
+9. Prepare the package version, changelog, advisory, and release notes together.
+10. Publish the package and advisory on the coordinated disclosure date.
+11. Credit the reporter unless the reporter requests anonymity.
+12. Monitor new reports and downstream feedback after release.
+
+Do not put embargoed details in public branches, pull requests, issues, logs, or CI artifacts.
+
+If a fuzz job fails, download its retained artifact. The artifact contains the sanitizer version, source commit, corpus pin, run counts, and failure log.
+
+The workflow retains each failure artifact for 30 days.
 
 ## Report a Vulnerability
 

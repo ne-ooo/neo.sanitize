@@ -1,7 +1,7 @@
 ---
 name: anti-patterns
 description: Common neo.sanitize mistakes involving DOM runtimes, CSS URLs, DOM clobbering, dangerous tags, broad attributes, and DocumentFragment output
-version: "1.0.0"
+version: "1.1.0"
 globs:
   - "**/*.ts"
   - "**/*.tsx"
