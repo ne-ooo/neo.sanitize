@@ -66,7 +66,13 @@ const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 const DOCUMENT_FRAGMENT_NODE = 11
 const MAX_MXSS_STABILIZATION_PASSES = 3
-const EMPTY_OPTIONS: Partial<SanitizeOptions> = Object.freeze({})
+type StringSanitizeOptions = Partial<Omit<SanitizeOptions, 'returnString'>> & {
+  returnString?: true
+}
+type FragmentSanitizeOptions = Partial<Omit<SanitizeOptions, 'returnString'>> & {
+  returnString: false
+}
+const EMPTY_OPTIONS: StringSanitizeOptions = Object.freeze({})
 const PREFLIGHT_VOID_TAGS = new Set(
   'area base br col embed hr img input link meta param source track wbr'.split(' ')
 )
@@ -217,6 +223,21 @@ export function compileSanitizeOptions(
  */
 export function sanitize(
   html: string,
+  options?: StringSanitizeOptions,
+  runtime?: DOMRuntime
+): string
+export function sanitize(
+  html: string,
+  options: FragmentSanitizeOptions,
+  runtime?: DOMRuntime
+): DocumentFragment
+export function sanitize(
+  html: string,
+  options?: Partial<SanitizeOptions>,
+  runtime?: DOMRuntime
+): string | DocumentFragment
+export function sanitize(
+  html: string,
   options: Partial<SanitizeOptions> = EMPTY_OPTIONS,
   runtime?: DOMRuntime
 ): string | DocumentFragment {
@@ -238,7 +259,7 @@ export function sanitize(
 export function sanitizeToTrustedHTML<TTrustedHTML extends TrustedHTMLLike>(
   html: string,
   trustedTypesPolicy: TrustedTypePolicyLike<TTrustedHTML>,
-  options: Partial<SanitizeOptions> = EMPTY_OPTIONS,
+  options: StringSanitizeOptions = EMPTY_OPTIONS,
   runtime?: DOMRuntime
 ): TTrustedHTML {
   const config = resolveOptions(options)
@@ -300,7 +321,7 @@ function sanitizeWithPolicy(
 ): string | DocumentFragment {
   const config = policy.config
 
-  if (!html || typeof html !== 'string') {
+  if (typeof html !== 'string') {
     if (config.returnString) {
       return ''
     }
@@ -325,6 +346,14 @@ function sanitizeWithPolicy(
   // Enforce the limit after beforeSanitize because a hook can replace a small
   // input with a much larger string.
   if (processedHtml.length > config.maxInputLength) {
+    return config.returnString
+      ? ''
+      : createDocumentFragment(resolveDOMRuntime(runtime).document)
+  }
+
+  // Give beforeSanitize a chance to replace an empty input, while preserving
+  // the no-DOM fast path when no fragment-level hook can produce output.
+  if (!processedHtml && !hooks?.afterSanitize) {
     return config.returnString
       ? ''
       : createDocumentFragment(resolveDOMRuntime(runtime).document)
@@ -861,12 +890,9 @@ function findMatchingTagNameEnd(
 ): number {
   if (!isASCIIAlpha(html[nameStart] ?? '')) return -1
 
-  let nameEnd = nameStart
-  while (nameEnd < html.length && !isHTMLTagNameDelimiter(html[nameEnd] ?? '')) {
-    nameEnd++
-  }
-
-  return asciiLowercase(html.slice(nameStart, nameEnd)) === expectedName
+  const nameEnd = nameStart + expectedName.length
+  return isHTMLTagNameDelimiter(html[nameEnd] ?? '') &&
+    asciiLowercase(html.slice(nameStart, nameEnd)) === expectedName
     ? nameEnd
     : -1
 }
@@ -1139,9 +1165,9 @@ function sanitizeAttribute(
 ): boolean {
   const config = policy.config
   const sourceAttrName = getAttributeName(attr)
-  const attrName = config.lowercaseAttributes
-    ? sourceAttrName.toLowerCase()
-    : sourceAttrName
+  // HTML parsers canonicalize attribute names before sanitization. The legacy
+  // lowercaseAttributes option is retained as a compatibility no-op.
+  const attrName = sourceAttrName.toLowerCase()
   const attrValue = getAttributeValue(attr)
 
   if (hooks?.onAttribute) {

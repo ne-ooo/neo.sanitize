@@ -358,6 +358,11 @@ describe('resource limits', () => {
     expect(
       sanitize('<script><div><div></script><p>safe</p>', { maxDOMDepth: 1 })
     ).toBe('<p>safe</p>')
+    expect(
+      sanitize(`<script>${'<a'.repeat(5_000)}</script><p>safe</p>`, {
+        maxDOMDepth: 1,
+      })
+    ).toBe('<p>safe</p>')
   })
 
   it('accounts for optional HTML end tags during nesting preflight', () => {

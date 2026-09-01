@@ -224,6 +224,21 @@ describe('mergeSchema', () => {
     expect(merged.allowedAttributes).not.toBe(BASIC_SCHEMA.allowedAttributes)
     expect(merged.allowedAttributes.a).not.toBe(BASIC_SCHEMA.allowedAttributes.a)
   })
+
+  it('preserves hooks in the merged options', () => {
+    let calls = 0
+    const merged = mergeSchema('BASIC', {
+      hooks: {
+        beforeSanitize() {
+          calls++
+          return '<p>Hooked</p>'
+        },
+      },
+    })
+
+    expect(sanitize('<p>Original</p>', merged)).toBe('<p>Hooked</p>')
+    expect(calls).toBe(1)
+  })
 })
 
 describe('configuration immutability', () => {

@@ -1,8 +1,11 @@
-import type { SanitizeOptions } from '../types.js'
+import type {
+  ResolvedSanitizeOptions as PublicResolvedSanitizeOptions,
+  SanitizeOptions,
+} from '../types.js'
 import { deepFreeze } from '../utils/object.js'
 import { resolveInsertionContext } from '../utils/context.js'
 
-export type ResolvedSanitizeOptions = Required<Omit<SanitizeOptions, 'hooks'>>
+export type ResolvedSanitizeOptions = PublicResolvedSanitizeOptions
 
 /**
  * Read an own data property without consulting a polluted prototype or

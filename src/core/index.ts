@@ -17,6 +17,7 @@ export { parseHTML, serializeHTML, resolveDOMRuntime, isBrowser, isNode } from '
 export { SANITIZER_VERSION } from '../version.js'
 export type {
   CompiledSanitizeOptions,
+  ResolvedSanitizeOptions,
   DOMParserLike,
   DOMRuntime,
   HTMLInsertionContext,

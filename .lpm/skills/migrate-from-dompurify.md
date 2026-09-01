@@ -280,24 +280,19 @@ import {
   isSafeURL,
   sanitizeURL,
   isDangerousProtocol,
-  sanitizeCSS,
 } from '@lpm.dev/neo.sanitize'
 
 // Use validators independently — no need to run full sanitization
 isDangerousTag('script')           // true
 isEventHandler('onclick')          // true
 isSafeURL('javascript:alert(1)')   // false
-sanitizeCSS('color: red; expression(alert(1))')  // 'color: red;'
 ```
 
 ### DOM Clobbering Prevention
 
 ```typescript
-// Neither DOMPurify nor sanitize-html expose this as a utility
-import { isDangerousId, isDangerousName } from '@lpm.dev/neo.sanitize'
-
-isDangerousId('createElement')  // true
-isDangerousName('submit', 'form')  // true
+// Remove every id and name attribute from untrusted HTML.
+sanitize(html, { preventDOMClobbering: true })
 ```
 
 ### Subpath Imports

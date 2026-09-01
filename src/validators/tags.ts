@@ -55,6 +55,11 @@ export const DANGEROUS_TAGS: readonly string[] = deepFreeze([
 ])
 
 const DANGEROUS_TAG_SET = new Set(DANGEROUS_TAGS)
+type TagCollection = readonly string[] | ReadonlySet<string>
+
+function collectionHas(collection: TagCollection, value: string): boolean {
+  return 'has' in collection ? collection.has(value) : collection.includes(value)
+}
 
 /**
  * Return true for custom-element-like names. The broad hyphen check also
@@ -88,6 +93,21 @@ export function normalizeTagName(tagName: string): string {
   return tagName.toLowerCase().trim()
 }
 
+function isTagAllowedNormalized(
+  tagName: string,
+  allowedTags: TagCollection,
+  allowCustomElements: boolean
+): boolean {
+  if (
+    isDangerousTagNormalized(tagName) ||
+    (!allowCustomElements && isCustomElementNameNormalized(tagName))
+  ) {
+    return false
+  }
+
+  return collectionHas(allowedTags, tagName)
+}
+
 /**
  * Check if a tag is allowed
  *
@@ -102,7 +122,7 @@ export function normalizeTagName(tagName: string): string {
  */
 export function isTagAllowed(
   tagName: string,
-  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS,
+  allowedTags: TagCollection = DEFAULT_ALLOWED_TAGS,
   allowCustomElements = false
 ): boolean {
   const normalized = normalizeTagName(tagName)
@@ -110,14 +130,7 @@ export function isTagAllowed(
   // Active-content tags are a security invariant, not a configurable
   // allowlist choice. Keeping this check here protects every caller of the
   // tag validator, including the core sanitizer and custom schemas.
-  if (
-    isDangerousTag(normalized) ||
-    (!allowCustomElements && isCustomElementNameNormalized(normalized))
-  ) {
-    return false
-  }
-
-  return allowedTags.includes(normalized)
+  return isTagAllowedNormalized(normalized, allowedTags, allowCustomElements)
 }
 
 /**
@@ -160,7 +173,7 @@ export function isDangerousTag(tagName: string): boolean {
  */
 export function validateTag(
   tagName: string,
-  allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS,
+  allowedTags: TagCollection = DEFAULT_ALLOWED_TAGS,
   allowCustomElements = false
 ): TagValidationResult {
   const normalized = normalizeTagName(tagName)
@@ -182,7 +195,7 @@ export function validateTag(
   }
 
   // Check if tag is in allowed list
-  const allowed = allowedTags.includes(normalized)
+  const allowed = collectionHas(allowedTags, normalized)
 
   if (!allowed) {
     return {
@@ -219,10 +232,11 @@ export function filterAllowedTags(
   allowedTags: readonly string[] | string[] = DEFAULT_ALLOWED_TAGS,
   allowCustomElements = false
 ): string[] {
+  const allowedTagSet = new Set(allowedTags)
   return tagNames
     .map(normalizeTagName)
     .filter((tagName) =>
-      isTagAllowed(tagName, allowedTags, allowCustomElements)
+      isTagAllowedNormalized(tagName, allowedTagSet, allowCustomElements)
     )
 }
 

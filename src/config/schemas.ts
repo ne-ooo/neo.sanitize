@@ -7,10 +7,13 @@
  * - STRICT: Paranoid security (text only, no HTML)
  */
 
-import type { SanitizeOptions } from '../types.js'
+import type { ResolvedSanitizeOptions, SanitizeOptions } from '../types.js'
 import { DEFAULT_OPTIONS } from './defaults.js'
-import { mergeOptions } from './options.js'
+import { mergeOptions, readOwnOption } from './options.js'
 import { deepFreeze } from '../utils/object.js'
+
+type MergedSanitizeSchema = Required<Omit<SanitizeOptions, 'hooks'>> &
+  Pick<SanitizeOptions, 'hooks'>
 
 /**
  * BASIC schema - Minimal HTML (text formatting only)
@@ -29,7 +32,7 @@ import { deepFreeze } from '../utils/object.js'
  * Security level: HIGH
  * Usability: LOW (very limited HTML)
  */
-export const BASIC_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
+export const BASIC_SCHEMA: ResolvedSanitizeOptions = deepFreeze({
   ...DEFAULT_OPTIONS,
 
   // Minimal tags (text formatting only)
@@ -97,7 +100,7 @@ export const BASIC_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze
  * Security level: MEDIUM
  * Usability: HIGH (rich HTML editing)
  */
-export const RELAXED_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
+export const RELAXED_SCHEMA: ResolvedSanitizeOptions = deepFreeze({
   ...DEFAULT_OPTIONS,
 
   // All default tags (including images, tables, headings)
@@ -142,7 +145,7 @@ export const RELAXED_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFree
  * Security level: MAXIMUM
  * Usability: NONE (all HTML stripped)
  */
-export const STRICT_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
+export const STRICT_SCHEMA: ResolvedSanitizeOptions = deepFreeze({
   ...DEFAULT_OPTIONS,
 
   // No tags allowed (strip all HTML)
@@ -177,7 +180,9 @@ export const STRICT_SCHEMA: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreez
  * const html = sanitize('<p>Hello <script>alert(1)</script></p>', schema)
  * // '<p>Hello </p>'
  */
-export function getSchema(schemaName: 'BASIC' | 'RELAXED' | 'STRICT'): Required<Omit<SanitizeOptions, 'hooks'>> {
+export function getSchema(
+  schemaName: 'BASIC' | 'RELAXED' | 'STRICT'
+): ResolvedSanitizeOptions {
   switch (schemaName) {
     case 'BASIC':
       return BASIC_SCHEMA
@@ -209,8 +214,11 @@ export function getSchema(schemaName: 'BASIC' | 'RELAXED' | 'STRICT'): Required<
 export function mergeSchema(
   schemaName: 'BASIC' | 'RELAXED' | 'STRICT',
   customOptions: Partial<SanitizeOptions>
-): Required<Omit<SanitizeOptions, 'hooks'>> {
+): MergedSanitizeSchema {
   const schema = getSchema(schemaName)
+  const merged: MergedSanitizeSchema = mergeOptions(schema, customOptions)
+  const hooks = readOwnOption(customOptions, 'hooks')
+  if (hooks !== undefined) merged.hooks = hooks
 
-  return mergeOptions(schema, customOptions)
+  return merged
 }

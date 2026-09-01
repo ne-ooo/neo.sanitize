@@ -110,4 +110,47 @@ describe('explicit DOM runtime', () => {
       })
     ).toThrowError(/DOM runtime failed to parse/)
   })
+
+  it('normalizes parser construction errors from the public parser API', () => {
+    const runtime = createRuntime()
+    const cause = new RangeError('runtime parser failed to initialize')
+    class ThrowingDOMParser {
+      constructor() {
+        throw cause
+      }
+    }
+
+    let thrown: unknown
+    try {
+      parseHTML('<p>Safe</p>', {
+        document: runtime.document,
+        DOMParser: ThrowingDOMParser as never,
+      })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toMatch(/DOM runtime failed to parse/)
+    expect((thrown as Error & { cause: unknown }).cause).toBe(cause)
+  })
+
+  it('normalizes missing parser methods from the public parser API', () => {
+    const runtime = createRuntime()
+    class MissingMethodDOMParser {}
+
+    let thrown: unknown
+    try {
+      parseHTML('<p>Safe</p>', {
+        document: runtime.document,
+        DOMParser: MissingMethodDOMParser as never,
+      })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toMatch(/DOM runtime failed to parse/)
+    expect((thrown as Error & { cause: unknown }).cause).toBeInstanceOf(TypeError)
+  })
 })

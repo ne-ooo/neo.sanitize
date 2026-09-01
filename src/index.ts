@@ -96,6 +96,7 @@ export { SANITIZER_VERSION } from './version.js'
 // TypeScript types
 export type {
   SanitizeOptions,
+  ResolvedSanitizeOptions,
   HTMLInsertionContext,
   CompiledSanitizeOptions,
   DOMParserLike,

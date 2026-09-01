@@ -77,6 +77,22 @@ describe('Hooks System', () => {
       expect(result).not.toContain('alert')
       expect(result).toContain('<p>Safe</p>')
     })
+
+    it('should allow replacing empty input', () => {
+      let calls = 0
+      const result = sanitize('', {
+        hooks: {
+          beforeSanitize(html) {
+            calls++
+            expect(html).toBe('')
+            return '<p>Default</p>'
+          },
+        },
+      })
+
+      expect(calls).toBe(1)
+      expect(result).toBe('<p>Default</p>')
+    })
   })
 
   describe('onElement hook', () => {

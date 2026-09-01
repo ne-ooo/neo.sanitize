@@ -5,7 +5,7 @@
  * Provides a safe baseline that blocks most XSS vectors.
  */
 
-import type { SanitizeOptions } from '../types.js'
+import type { ResolvedSanitizeOptions } from '../types.js'
 import { deepFreeze } from '../utils/object.js'
 import {
   DEFAULT_ALLOWED_TAGS,
@@ -27,7 +27,7 @@ import {
  * - Denies id/class attributes by default (CSS collision)
  * - Denies style attribute by default (CSS injection)
  */
-export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = deepFreeze({
+export const DEFAULT_OPTIONS: ResolvedSanitizeOptions = deepFreeze({
   // Tags and attributes
   allowedTags: [...DEFAULT_ALLOWED_TAGS],
   allowedAttributes: Object.fromEntries(
@@ -48,8 +48,8 @@ export const DEFAULT_OPTIONS: Required<Omit<SanitizeOptions, 'hooks'>> = deepFre
   // Behavior
   stripTags: false, // Keep wrappers for allowed elements
   keepTextContent: true, // Unwrap denied safe elements and keep sanitized children
-  lowercaseTags: true, // Normalize tag names to lowercase
-  lowercaseAttributes: true, // Normalize attribute names to lowercase
+  lowercaseTags: true, // Deprecated compatibility no-op; HTML parsers normalize names
+  lowercaseAttributes: true, // Deprecated compatibility no-op; HTML parsers normalize names
   returnString: true, // Return sanitized HTML as string (not DocumentFragment)
   insertionContext: 'body', // Preserve document-body parsing by default
   maxInputLength: 200_000, // Bound work before the DOM runtime parses input

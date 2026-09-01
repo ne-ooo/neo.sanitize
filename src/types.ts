@@ -30,35 +30,35 @@ export interface SanitizeOptions {
    * @default DEFAULT_ALLOWED_TAGS
    * @example ['p', 'br', 'strong', 'em']
    */
-  allowedTags?: string[]
+  allowedTags?: readonly string[]
 
   /**
    * List of allowed attributes per tag
    * @default DEFAULT_ALLOWED_ATTRIBUTES
    * @example { a: ['href', 'title'], img: ['src', 'alt'] }
    */
-  allowedAttributes?: Record<string, string[]>
+  allowedAttributes?: Readonly<Record<string, readonly string[]>>
 
   /**
    * List of allowed URL protocols for href, src, etc.
    * @default ['http', 'https', 'mailto', 'tel']
    * @example ['http', 'https', 'ftp']
    */
-  allowedProtocols?: string[]
+  allowedProtocols?: readonly string[]
 
   /**
    * List of forbidden attributes (always removed)
    * @default FORBIDDEN_ATTRIBUTES (event handlers like onclick, onerror)
    * @example ['onclick', 'onerror', 'onload']
    */
-  forbiddenAttributes?: string[]
+  forbiddenAttributes?: readonly string[]
 
   /**
    * Allow all attributes for specified tags
    * @default []
    * @example ['code', 'pre'] // Allow all attributes on code/pre tags
    */
-  allowAllAttributes?: string[]
+  allowAllAttributes?: readonly string[]
 
   /**
    * Allow data-* attributes globally
@@ -113,13 +113,15 @@ export interface SanitizeOptions {
   keepTextContent?: boolean
 
   /**
-   * Transform tag names to lowercase
+   * @deprecated HTML parsers always canonicalize HTML tag names. This option
+   * is retained as a compatibility no-op.
    * @default true
    */
   lowercaseTags?: boolean
 
   /**
-   * Transform attribute names to lowercase
+   * @deprecated HTML parsers always canonicalize HTML attribute names. This
+   * option is retained as a compatibility no-op.
    * @default true
    */
   lowercaseAttributes?: boolean
@@ -189,8 +191,13 @@ export interface SanitizeOptions {
   hooks?: SanitizeHooks
 }
 
+/** Fully resolved, recursively immutable sanitizer configuration. */
+export type ResolvedSanitizeOptions = Readonly<
+  Required<Omit<SanitizeOptions, 'hooks'>>
+>
+
 /** Frozen options that reuse a compiled sanitizer policy across calls. */
-export type CompiledSanitizeOptions = Readonly<Required<Omit<SanitizeOptions, 'hooks'>>>
+export type CompiledSanitizeOptions = ResolvedSanitizeOptions
 
 /** Minimum opaque TrustedHTML shape returned by a browser policy. */
 export interface TrustedHTMLLike {
@@ -259,7 +266,7 @@ export interface Sanitizer {
   /**
    * Get current configuration
    */
-  getConfig(): Readonly<Required<Omit<SanitizeOptions, 'hooks'>>>
+  getConfig(): ResolvedSanitizeOptions
 
   /**
    * Update configuration

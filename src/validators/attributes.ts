@@ -16,6 +16,7 @@ import {
   ARIA_ATTRIBUTE_REGEX,
   URL_ATTRIBUTES,
   DEFAULT_ALLOWED_ATTRIBUTES,
+  ALLOWED_PROTOCOLS,
 } from '../utils/constants.js'
 import { isSafeURLAttributeValueNormalized } from './protocols.js'
 import { validateDomClobbering } from './dom-clobbering.js'
@@ -439,9 +440,29 @@ export function filterAllowedAttributes(
   options: Partial<SanitizeOptions> = {}
 ): Record<string, string> {
   const result = Object.create(null) as Record<string, string>
+  const compiledAllowedAttributes = new Map<string, ReadonlySet<string>>()
+  if (Object.prototype.hasOwnProperty.call(allowedAttributes, tagName)) {
+    const allowedNames = allowedAttributes[tagName]
+    if (allowedNames) {
+      compiledAllowedAttributes.set(tagName, new Set(allowedNames))
+    }
+  }
+  const policy: AttributeValidationPolicy = {
+    forbiddenAttributes: new Set(options.forbiddenAttributes ?? FORBIDDEN_ATTRIBUTES),
+    allowAllAttributes: new Set(options.allowAllAttributes ?? []),
+    allowedAttributes: compiledAllowedAttributes,
+    allowedProtocols: new Set(options.allowedProtocols ?? ALLOWED_PROTOCOLS),
+  }
 
   for (const [attrName, attrValue] of Object.entries(attributes)) {
-    const validation = validateAttribute(tagName, attrName, attrValue, allowedAttributes, options)
+    const validation = validateAttribute(
+      tagName,
+      attrName,
+      attrValue,
+      allowedAttributes,
+      options,
+      policy
+    )
 
     if (validation.allowed) {
       // Use sanitized value if available

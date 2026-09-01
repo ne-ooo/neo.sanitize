@@ -52,7 +52,7 @@
     "security:metadata": "node scripts/write-security-metadata.mjs security-artifacts/metadata.json",
     "test:watch": "vitest",
     "bench": "vitest bench",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.types.json",
     "clean": "rm -rf dist",
     "release:check": "lpm run typecheck && lpm run test:coverage && lpm run build && lpm run test:package",
     "prepublishOnly": "lpm run release:check"

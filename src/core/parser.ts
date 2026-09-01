@@ -189,17 +189,17 @@ export function parseDocumentWithRuntime(
   dom: DOMRuntime
 ): Document {
   let captured = PARSER_CACHE.get(dom.DOMParser)
-  if (!captured) {
-    const parser = new dom.DOMParser()
-    captured = {
-      parser,
-      parseFromString: captureDOMMethod(parser, 'parseFromString'),
-    }
-    PARSER_CACHE.set(dom.DOMParser, captured)
-  }
-
   let parsedDocument: Document
   try {
+    if (!captured) {
+      const parser = new dom.DOMParser()
+      captured = {
+        parser,
+        parseFromString: captureDOMMethod(parser, 'parseFromString'),
+      }
+      PARSER_CACHE.set(dom.DOMParser, captured)
+    }
+
     parsedDocument = Reflect.apply(captured.parseFromString, captured.parser, [
       html,
       'text/html',

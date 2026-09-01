@@ -45,8 +45,8 @@ sanitizeBasic('<div><p>Hello <strong>World</strong></p><img src="x"></div>')
 // '<p>Hello <strong>World</strong></p>'
 
 // RELAXED — rich HTML (images, tables, headings, classes, data attributes)
-sanitizeRelaxed('<div class="card"><img src="photo.jpg" alt="Photo"><table>...</table></div>')
-// '<div class="card"><img src="photo.jpg" alt="Photo"><table>...</table></div>'
+sanitizeRelaxed('<div class="card"><img src="photo.jpg" alt="Photo"><table><tr><td>Cell</td></tr></table></div>')
+// '<div class="card"><img src="photo.jpg" alt="Photo"><table><tbody><tr><td>Cell</td></tr></tbody></table></div>'
 
 // STRICT — text only (all HTML stripped)
 sanitizeStrict('<p>Hello <b>World</b></p>')

@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import { performance } from 'node:perf_hooks'
 import { Window } from 'happy-dom'
 import { JSDOM } from 'jsdom'
-import { isSafeURLAttributeValue, sanitize } from '../dist/index.js'
+import {
+  filterAllowedAttributes,
+  filterAllowedTags,
+  isSafeURLAttributeValue,
+  sanitize,
+} from '../dist/index.js'
 
 const MEBIBYTE = 1024 * 1024
 const window = new JSDOM('').window
@@ -132,6 +137,64 @@ assert.ok(
   'Raw-text preflight work scaled with lexical depth.'
 )
 
+const scriptNearMissSmall = `<script>${'<a'.repeat(6_000)}</script>`
+const scriptNearMissLarge = `<script>${'<a'.repeat(12_000)}</script>`
+sanitize(scriptNearMissSmall, preflightOptions, preflightRuntime)
+sanitize(scriptNearMissLarge, preflightOptions, preflightRuntime)
+const scriptNearMissSmallMs = medianDuration(() =>
+  sanitize(scriptNearMissSmall, preflightOptions, preflightRuntime)
+)
+const scriptNearMissLargeMs = medianDuration(() =>
+  sanitize(scriptNearMissLarge, preflightOptions, preflightRuntime)
+)
+assert.ok(
+  ratio(scriptNearMissLargeMs, scriptNearMissSmallMs) < 3.5,
+  'Script-data preflight near-matches amplified work beyond the regression limit.'
+)
+
+function createBulkFilterInput(size) {
+  const names = Array.from({ length: size }, (_, index) => `safe-${index}`)
+  return {
+    names,
+    attributes: Object.fromEntries(names.map((name) => [name, 'value'])),
+  }
+}
+
+const bulkSmall = createBulkFilterInput(8_000)
+const bulkLarge = createBulkFilterInput(16_000)
+filterAllowedTags(bulkSmall.names, bulkSmall.names, true)
+filterAllowedTags(bulkLarge.names, bulkLarge.names, true)
+filterAllowedAttributes(
+  'div',
+  bulkSmall.attributes,
+  { div: bulkSmall.names }
+)
+filterAllowedAttributes(
+  'div',
+  bulkLarge.attributes,
+  { div: bulkLarge.names }
+)
+const bulkTagsSmallMs = medianDuration(() =>
+  filterAllowedTags(bulkSmall.names, bulkSmall.names, true)
+)
+const bulkTagsLargeMs = medianDuration(() =>
+  filterAllowedTags(bulkLarge.names, bulkLarge.names, true)
+)
+const bulkAttributesSmallMs = medianDuration(() =>
+  filterAllowedAttributes('div', bulkSmall.attributes, { div: bulkSmall.names })
+)
+const bulkAttributesLargeMs = medianDuration(() =>
+  filterAllowedAttributes('div', bulkLarge.attributes, { div: bulkLarge.names })
+)
+assert.ok(
+  ratio(bulkTagsLargeMs, bulkTagsSmallMs) < 3.5,
+  'Bulk tag filtering scaled beyond the regression limit.'
+)
+assert.ok(
+  ratio(bulkAttributesLargeMs, bulkAttributesSmallMs) < 3.5,
+  'Bulk attribute filtering scaled beyond the regression limit.'
+)
+
 const safeCandidates = Array.from(
   { length: 500_000 },
   (_, index) => `https://img.test/${index}.png 1x`
@@ -180,6 +243,15 @@ console.log(
     contextualScalingRatio: ratio(contextualLargeMs, contextualSmallMs),
     nestedCSSRatio: ratio(nestedCSSMs, flatCSSMs),
     rawTextPreflightRatio: ratio(deepPreflightMs, flatPreflightMs),
+    scriptNearMissPreflightRatio: ratio(
+      scriptNearMissLargeMs,
+      scriptNearMissSmallMs
+    ),
+    bulkTagFilterRatio: ratio(bulkTagsLargeMs, bulkTagsSmallMs),
+    bulkAttributeFilterRatio: ratio(
+      bulkAttributesLargeMs,
+      bulkAttributesSmallMs
+    ),
     unsafeFirstURLMilliseconds: urlMs,
     unsafeFirstURLHeapBytes: urlHeap,
   })
