@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { sanitize } from '../../src/index.js'
-import corpus from '../corpus/dompurify-v3.4.14.json'
+import corpus from '../corpus/dompurify-v3.4.15.json'
 import { assertHTMLSecurityInvariants } from './security-invariants.js'
 
-const CORPUS_FILENAME = 'dompurify-v3.4.14.json'
+const CORPUS_FILENAME = 'dompurify-v3.4.15.json'
 
 describe('DOMPurify public fixture corpus', () => {
   it('uses the reviewed version-pinned corpus', () => {

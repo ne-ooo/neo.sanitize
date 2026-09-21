@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as fc from 'fast-check'
 import { sanitize } from '../../src/index.js'
 import type { SanitizeOptions } from '../../src/types.js'
-import corpus from '../corpus/dompurify-v3.4.14.json'
+import corpus from '../corpus/dompurify-v3.4.15.json'
 import { assertHTMLSecurityInvariants } from '../security/security-invariants.js'
 
 const fuzzRuns = Number(process.env.FUZZ_RUNS ?? 300)

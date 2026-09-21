@@ -66,7 +66,7 @@ test('public corpus and generated markup satisfy browser security invariants', a
 
   const moduleSource = await readFile(resolve('dist/index.js'), 'utf8')
   const corpus = JSON.parse(
-    await readFile(resolve('test/corpus/dompurify-v3.4.14.json'), 'utf8')
+    await readFile(resolve('test/corpus/dompurify-v3.4.15.json'), 'utf8')
   ) as Corpus
   const cases = [
     ...browserRegressions,

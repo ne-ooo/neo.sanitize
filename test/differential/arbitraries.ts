@@ -58,7 +58,7 @@ const MALFORMED_CONTEXT_TOKENS = [
 
 const corpus = JSON.parse(
   readFileSync(
-    new URL('../corpus/dompurify-v3.4.14.json', import.meta.url),
+    new URL('../corpus/dompurify-v3.4.15.json', import.meta.url),
     'utf8'
   )
 ) as { cases: Array<{ payload: string }> }

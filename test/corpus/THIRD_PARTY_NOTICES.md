@@ -1,11 +1,11 @@
 # Third-Party Test Corpus
 
-`dompurify-v3.4.14.json` contains modified test fixtures from DOMPurify.
+`dompurify-v3.4.15.json` contains modified test fixtures from DOMPurify.
 
 - Project: DOMPurify
 - Source: `test/fixtures/expect.mjs`
-- Version: 3.4.14
-- Commit: `4e6fe24173f1a85eafacd95e3c82966e29d34d49`
+- Version: 3.4.15
+- Commit: `1d7460c4f8a27be825c11b1c9d346d79db32c1e5`
 - Source SHA-256: `1c8f8dad1874fcd375665070a8e2be8e011b63a6d6b2ce27ab08585e324eef75`
 - Copyright: Cure53 and other contributors
 - License: Apache License 2.0

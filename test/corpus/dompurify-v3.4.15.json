@@ -3,8 +3,8 @@
     "project": "DOMPurify",
     "repository": "https://github.com/cure53/DOMPurify",
     "file": "test/fixtures/expect.mjs",
-    "version": "3.4.14",
-    "commit": "4e6fe24173f1a85eafacd95e3c82966e29d34d49",
+    "version": "3.4.15",
+    "commit": "1d7460c4f8a27be825c11b1c9d346d79db32c1e5",
     "sha256": "1c8f8dad1874fcd375665070a8e2be8e011b63a6d6b2ce27ab08585e324eef75",
     "license": "Apache-2.0"
   },
