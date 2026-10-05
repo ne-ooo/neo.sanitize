@@ -2,7 +2,7 @@ import { Window } from 'happy-dom'
 import { describe, expect, it } from 'vitest'
 import { sanitize } from '../src/index.js'
 import type { DOMRuntime } from '../src/types.js'
-import corpus from './corpus/dompurify-v3.4.14.json'
+import corpus from './corpus/dompurify-v3.4.16.json'
 import { assertHTMLSecurityInvariants } from './security/security-invariants.js'
 
 const window = new Window()
